@@ -1,0 +1,18 @@
+{
+  "semi": false,
+  "trailingComma": "all",
+  "singleQuote": false,
+  "arrowParens": "always",
+  "importOrder": ["^@rio.js/(.*)$", "^@/components/(.*)$", "^[./]"],
+  "importOrderSeparation": true,
+  "importOrderSortSpecifiers": true,
+  "importOrderParserPlugins": [
+    "explicitResourceManagement",
+    "typescript",
+    "jsx",
+    "classProperties",
+    "decoratorsLegacy"
+  ],
+  "importOrderSideEffects": false,
+  "plugins": ["@trivago/prettier-plugin-sort-imports"]
+}
