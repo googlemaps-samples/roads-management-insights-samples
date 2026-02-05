@@ -2,6 +2,9 @@
 FROM node:20-slim AS build-ui
 WORKDIR /app/ui
 COPY ui/ ./
+RUN npm install
+RUN npm run build
+
 
 # Stage 2: Build the Python backend
 FROM python:3.12-slim
