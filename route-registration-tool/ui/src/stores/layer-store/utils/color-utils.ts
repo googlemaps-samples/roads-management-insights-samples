@@ -1,0 +1,119 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import {
+  IMPORTED_ROADS_DEFAULT_COLOR,
+  IMPORTED_ROADS_DEFAULT_COLOR_SATELLITE,
+  IMPORTED_ROADS_GRAYSCALE_COLOR,
+  IMPORTED_ROADS_GRAYSCALE_COLOR_SATELLITE,
+  IMPORTED_ROADS_HOVERED_COLOR,
+  IMPORTED_ROADS_HOVERED_COLOR_SATELLITE,
+  IMPORTED_ROADS_LASSO_COLOR,
+  IMPORTED_ROADS_LASSO_COLOR_SATELLITE,
+  IMPORTED_ROADS_SELECTED_COLOR,
+  IMPORTED_ROADS_SELECTED_COLOR_SATELLITE,
+  IMPORTED_ROADS_VALID_COLOR,
+  IMPORTED_ROADS_VALID_COLOR_SATELLITE,
+  INDIVIDUAL_PREVIEW_COLOR,
+  INDIVIDUAL_PREVIEW_COLOR_SATELLITE,
+  JURISDICTION_BOUNDARY_COLOR,
+  JURISDICTION_BOUNDARY_COLOR_SATELLITE,
+  PATH_BORDER_COLOR,
+  PATH_BORDER_COLOR_INDIVIDUAL_PREVIEW,
+  PATH_BORDER_COLOR_INDIVIDUAL_PREVIEW_SATELLITE,
+  PATH_BORDER_COLOR_SATELLITE,
+  POLYGON_ROUTE_COLOR,
+  POLYGON_ROUTE_COLOR_SATELLITE,
+  ROADS_NETWORK_COLOR,
+  ROADS_NETWORK_COLOR_SATELLITE,
+  ROAD_SELECTION_COLOR,
+  ROAD_SELECTION_COLOR_SATELLITE,
+  ROUTE_STATUS_COLORS,
+  ROUTE_STATUS_COLORS_SATELLITE,
+  SEGMENT_BASE_COLOR,
+  SEGMENT_BASE_COLOR_SATELLITE,
+  SEGMENT_HOVER_COLOR,
+  SEGMENT_HOVER_COLOR_SATELLITE,
+  SELECTED_ROUTE_COLOR,
+  SELECTED_ROUTE_COLOR_SATELLITE,
+  UPLOADED_ROUTE_COLOR,
+  UPLOADED_ROUTE_COLOR_SATELLITE,
+} from "../constants"
+
+type MapType = "roadmap" | "hybrid"
+
+/**
+ * Get colors based on map type (roadmap or satellite/hybrid)
+ * Returns high contrast colors for satellite view, normal colors for roadmap
+ */
+export function getColorsForMapType(mapType: MapType) {
+  const isSatellite = mapType === "hybrid"
+
+  return {
+    routeStatusColors: isSatellite
+      ? ROUTE_STATUS_COLORS_SATELLITE
+      : ROUTE_STATUS_COLORS,
+    selectedRouteColor: isSatellite
+      ? SELECTED_ROUTE_COLOR_SATELLITE
+      : SELECTED_ROUTE_COLOR,
+    individualPreviewColor: isSatellite
+      ? INDIVIDUAL_PREVIEW_COLOR_SATELLITE
+      : INDIVIDUAL_PREVIEW_COLOR,
+    segmentHoverColor: isSatellite
+      ? SEGMENT_HOVER_COLOR_SATELLITE
+      : SEGMENT_HOVER_COLOR,
+    segmentBaseColor: isSatellite
+      ? SEGMENT_BASE_COLOR_SATELLITE
+      : SEGMENT_BASE_COLOR,
+    roadSelectionColor: isSatellite
+      ? ROAD_SELECTION_COLOR_SATELLITE
+      : ROAD_SELECTION_COLOR,
+    polygonRouteColor: isSatellite
+      ? POLYGON_ROUTE_COLOR_SATELLITE
+      : POLYGON_ROUTE_COLOR,
+    uploadedRouteColor: isSatellite
+      ? UPLOADED_ROUTE_COLOR_SATELLITE
+      : UPLOADED_ROUTE_COLOR,
+    jurisdictionBoundaryColor: isSatellite
+      ? JURISDICTION_BOUNDARY_COLOR_SATELLITE
+      : JURISDICTION_BOUNDARY_COLOR,
+    pathBorderColor: isSatellite
+      ? PATH_BORDER_COLOR_SATELLITE
+      : PATH_BORDER_COLOR,
+    pathBorderColorIndividualPreview: isSatellite
+      ? PATH_BORDER_COLOR_INDIVIDUAL_PREVIEW_SATELLITE
+      : PATH_BORDER_COLOR_INDIVIDUAL_PREVIEW,
+    roadsNetworkColor: isSatellite
+      ? ROADS_NETWORK_COLOR_SATELLITE
+      : ROADS_NETWORK_COLOR,
+    importedRoadsDefaultColor: isSatellite
+      ? IMPORTED_ROADS_DEFAULT_COLOR_SATELLITE
+      : IMPORTED_ROADS_DEFAULT_COLOR,
+    importedRoadsHoveredColor: isSatellite
+      ? IMPORTED_ROADS_HOVERED_COLOR_SATELLITE
+      : IMPORTED_ROADS_HOVERED_COLOR,
+    importedRoadsSelectedColor: isSatellite
+      ? IMPORTED_ROADS_SELECTED_COLOR_SATELLITE
+      : IMPORTED_ROADS_SELECTED_COLOR,
+    importedRoadsValidColor: isSatellite
+      ? IMPORTED_ROADS_VALID_COLOR_SATELLITE
+      : IMPORTED_ROADS_VALID_COLOR,
+    importedRoadsLassoColor: isSatellite
+      ? IMPORTED_ROADS_LASSO_COLOR_SATELLITE
+      : IMPORTED_ROADS_LASSO_COLOR,
+    importedRoadsGrayscaleColor: isSatellite
+      ? IMPORTED_ROADS_GRAYSCALE_COLOR_SATELLITE
+      : IMPORTED_ROADS_GRAYSCALE_COLOR,
+  }
+}

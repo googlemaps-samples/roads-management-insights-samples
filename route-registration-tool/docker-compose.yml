@@ -1,0 +1,8 @@
+services:
+  roads-selection-tool:
+    build: .
+    image: route-registration-tool:latest
+    volumes:
+      - ~/.config/gcloud:/root/.config/gcloud:ro
+    ports:
+      - 8001:8080

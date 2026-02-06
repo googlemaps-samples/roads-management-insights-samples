@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Sample Region",
+        "description": "This is a sample region for reference",
+        "area": "downtown",
+        "country": "US",
+        "city": "New York"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-74.0059, 40.7128],
+            [-74.0059, 40.7589],
+            [-73.9857, 40.7589],
+            [-73.9857, 40.7128],
+            [-74.0059, 40.7128]
+          ]
+        ]
+      }
+    }
+  ]
+}
