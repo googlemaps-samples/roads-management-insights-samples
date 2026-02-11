@@ -58,13 +58,15 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
     - Copy `.env.example` into a file called `.env`.
     - Open the `.env` file and set Google API key there.
 
-5. **Build and Deploy Docker Container**
+5. **Build and Deploy Docker Container (Local Deployment Only)**
+
+  *Note: This step is only necessary if you want to deploy the container locally.*
 
   - Build the Docker image:
     ```bash
     docker compose build -t <image_name> .
     ```
-    - Open docker-compose.yml file and ensure the image name in correct
+    - Open `docker-compose.yml` file and ensure the image name is correct.
   - Deploy the container:
     ```bash
     docker compose up -d
