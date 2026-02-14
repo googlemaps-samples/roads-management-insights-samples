@@ -16,6 +16,7 @@
 import logging
 import os
 import json
+from typing import Optional
 from dotenv import load_dotenv
 from .create_engine import async_engine
 from sqlalchemy import text
