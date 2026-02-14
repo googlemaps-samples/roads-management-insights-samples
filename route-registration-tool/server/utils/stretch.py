@@ -253,16 +253,19 @@ def insert_stretch_into_db(stretch, project_id, tag, route_map, i):
 
     insert_query = """
     INSERT INTO routes 
-    (uuid, project_id, route_name, origin, destination, waypoints, center, encoded_polyline, 
+    (uuid, project_id, project_uuid, route_name, origin, destination, waypoints, center, encoded_polyline, 
      route_type, length, sync_status, is_enabled, created_at, updated_at, 
      tag, start_lat, start_lng, end_lat, end_lng, min_lat, max_lat, min_lng, max_lng)
     VALUES
-    (:uuid, :project_id, :route_name, :origin, :destination, :waypoints, :center, :encoded_polyline, 
+    (:uuid, :project_id, :project_uuid, :route_name, :origin, :destination, :waypoints, :center, :encoded_polyline, 
      'stretch', :length, 'unsynced', 1, :created_at, :updated_at,
      :tag, :start_lat, :start_lng, :end_lat, :end_lng, :min_lat, :max_lat, :min_lng, :max_lng)
     """
 
     with engine.begin() as conn:
+        project_uuid_row = conn.execute(text("SELECT project_uuid FROM projects WHERE id = :id"), {"id": project_id}).fetchone()
+        project_uuid = project_uuid_row[0] if project_uuid_row and project_uuid_row[0] else None
+        data_to_insert["project_uuid"] = project_uuid
         conn.execute(text(insert_query), data_to_insert)
     
     # Log stretch route creation to Firestore asynchronously (non-blocking)

@@ -36,13 +36,26 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
-VIEW_MODE = os.getenv('VIEW_MODE')
-if not VIEW_MODE:
-    raise ValueError("VIEW_MODE is not set in the environment variables.")
+VIEW_MODE = os.getenv('VIEW_MODE') or "false"
 
 # -------------------------
 # DATABASE HELPERS
 # -------------------------
+async def get_project_uuid(db_project_id: int) -> Optional[str]:
+    """Return project_uuid for the given project id, or None if not found."""
+    try:
+        async with async_engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT project_uuid FROM projects WHERE id = :id AND deleted_at IS NULL"),
+                {"id": db_project_id},
+            )
+            row = result.fetchone()
+            return row[0] if row and row[0] else None
+    except Exception as e:
+        logger.error(f"Error fetching project_uuid for project {db_project_id}: {e}")
+        return None
+
+
 async def update_deleted_route(db_project_id, uuid):
     try:
         async with async_engine.begin() as conn:
@@ -100,7 +113,8 @@ async def update_validating_route(db_project_id, uuid, status, route_status, val
 # MAIN FLOW
 # -------------------------
 async def sync_single_route_to_bigquery(db_project_id, project_number, uuid, route):
-    payload = await prepare_payload_single(route)
+    project_uuid = await get_project_uuid(db_project_id)
+    payload = await prepare_payload_single(route, project_uuid=project_uuid)
     # Debug logging removed - use logger.debug() instead of writing to file
     if VIEW_MODE == "TRUE":
         logger.info(f"Running in view mode. Skipping sync of route {uuid} for project {db_project_id}.")            

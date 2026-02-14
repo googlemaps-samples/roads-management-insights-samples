@@ -203,7 +203,11 @@ async def prepare_payload(rows, project_number):
 
     return {"requests": requests_list}
 
-async def prepare_payload_single(rows):
+async def prepare_payload_single(rows, project_uuid):
+    """
+    Build payload for single route creation.
+    project_uuid is looked up from project_id by the caller; when set, it is stored in route_attributes.
+    """
     for uuid, route_name, origin, destination, waypoints, sync_status, length, tag, route_type in rows:
         origin_lat = json.loads(origin)["lat"]
         origin_lng = json.loads(origin)["lng"]
@@ -220,15 +224,21 @@ async def prepare_payload_single(rows):
             if wp_list:
                 dynamic_route["intermediates"] = wp_list
 
+        route_attrs = {
+            "length": str(length),
+            "tag": tag if tag else "Untagged",
+            "route_type": route_type,
+            "created_by": "Roads Selection Tool"
+        }
+        if project_uuid:
+            route_attrs["project_uuid"] = project_uuid
+        else:
+            raise ValueError("project_uuid is required")
+            
         request_obj = {
             "displayName": route_name,
             "dynamicRoute": dynamic_route,
-            "route_attributes": {
-                "length": str(length),
-                "tag": tag if tag else "Untagged",
-                "route_type": route_type,
-                "created_by": "Roads Selection Tool"
-            }
+            "route_attributes": route_attrs
         }
 
     return request_obj
@@ -236,9 +246,10 @@ async def prepare_payload_single(rows):
 # -------------------------
 # GET SINGLE ROUTE
 # -------------------------
-async def get_route(project_number, route_id):
+async def get_route(project_number, route_id, project_uuid=None):
     """
     Fetch a single selectedRoute from Google Roads API.
+    If project_uuid is provided, only return the route if its routeAttributes.project_uuid matches.
     Returns JSON dict or None.
     """
     url = f"{API_URL}{project_number}/selectedRoutes/{route_id}"
@@ -249,7 +260,12 @@ async def get_route(project_number, route_id):
             if response.status_code == 404:
                 return None
             response.raise_for_status()
-            return response.json()
+            route = response.json()
+            if project_uuid is not None:
+                attrs = route.get("routeAttributes") or {}
+                if attrs.get("project_uuid") != project_uuid:
+                    return None
+            return route
     except Exception as e:
         logger.error(f"Error fetching route {route_id}: {e}")
         return None
@@ -257,10 +273,10 @@ async def get_route(project_number, route_id):
 # -------------------------
 # LIST ALL ROUTES (PAGINATION)
 # -------------------------
-async def list_routes(project_number, page_size=5000):
+async def list_routes(project_number, page_size=5000, project_uuid=None):
     """
-    Returns a list of all selectedRoutes from Roads API.
-    Handles pagination.
+    Returns a list of selectedRoutes from Roads API. Handles pagination.
+    If project_uuid is provided, only routes whose routeAttributes.project_uuid matches are returned.
     
     Raises:
         RouteListError: If the API call fails (fail-fast behavior)
@@ -269,7 +285,7 @@ async def list_routes(project_number, page_size=5000):
     next_page_token = None
     token = await get_oauth_token()
     page_number = 0
-    
+
     while True:
         url = f"{API_URL}{project_number}/selectedRoutes"
         params = {"pageSize": page_size}
@@ -279,7 +295,7 @@ async def list_routes(project_number, page_size=5000):
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.get(url, headers=await _headers(project_number, token), params=params)
-                
+
                 # Check for HTTP errors
                 if response.status_code != 200:
                     try:
@@ -288,7 +304,7 @@ async def list_routes(project_number, page_size=5000):
                         error_message = error_obj.get("message", f"HTTP {response.status_code}")
                     except ValueError:
                         error_message = f"HTTP {response.status_code}: {response.text}"
-                    
+
                     logger.error(f"Failed to list routes (page {page_number}): {error_message}")
                     raise RouteListError(
                         status_code=response.status_code,
@@ -298,7 +314,7 @@ async def list_routes(project_number, page_size=5000):
                             "routes_fetched_so_far": len(all_routes),
                         }
                     )
-                
+
                 data = response.json()
                 routes = data.get("selectedRoutes", [])
                 all_routes.extend(routes)
@@ -331,6 +347,12 @@ async def list_routes(project_number, page_size=5000):
                     "exception": str(e),
                 }
             )
+
+    if project_uuid is not None:
+        all_routes = [
+            r for r in all_routes
+            if (r.get("routeAttributes") or {}).get("project_uuid") == project_uuid
+        ]
 
     return all_routes
 

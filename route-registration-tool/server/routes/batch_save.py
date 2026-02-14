@@ -30,6 +30,8 @@ router = APIRouter(prefix="/routes", tags=["Batch Save"])
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+MAX_ROUTES_PER_PROJECT = 1000
+
 wgs84 = Proj(init="epsg:4326")
 utm = Proj(init="epsg:32633")
 
@@ -62,11 +64,11 @@ async def batch_save_routes(request: BatchSaveRoutesRequest, background_tasks: B
     added_routes = 0
     excluded_routes = 0
 
-    # Fetch jurisdiction boundary once for the project
+    # Fetch jurisdiction boundary and project_uuid once for the project
     region_id = request.routes[0].region_id
     logger.debug(f"Fetching project with region_id: {region_id}")
     project = await query_db(
-        "SELECT jurisdiction_boundary_geojson FROM projects WHERE id = ? AND deleted_at IS NULL",
+        "SELECT jurisdiction_boundary_geojson, project_uuid FROM projects WHERE id = ? AND deleted_at IS NULL",
         (region_id,),
         one=True
     )
@@ -74,6 +76,15 @@ async def batch_save_routes(request: BatchSaveRoutesRequest, background_tasks: B
         logger.error(f"Project with region_id {region_id} not found")
         raise HTTPException(status_code=404, detail="Project not found")
 
+    # Check current route count for the project (top-level routes only)
+    count_row = await query_db(
+        "SELECT COUNT(*) AS cnt FROM routes WHERE project_id = ? AND deleted_at IS NULL",
+        (region_id,),
+        one=True
+    )
+    current_route_count = (count_row["cnt"] or 0) if count_row else 0
+
+    project_uuid = project["project_uuid"] or ""
     boundary_geojson = project["jurisdiction_boundary_geojson"]
     if not boundary_geojson:
         logger.warning("No jurisdiction boundary defined for the project")
@@ -192,6 +203,7 @@ async def batch_save_routes(request: BatchSaveRoutesRequest, background_tasks: B
         to_insert.append((  # Prepare data for insertion
                 uuid,
                 r.region_id,
+                project_uuid,
                 r.route_name,
                 origin_json,
                 dest_json,
@@ -220,18 +232,27 @@ async def batch_save_routes(request: BatchSaveRoutesRequest, background_tasks: B
         })
         logger.info(f"Prepared route {uuid} for insertion.")
 
+    # Enforce max routes per project before inserting
+    if to_insert:
+        new_total = current_route_count + len(to_insert)
+        if new_total > MAX_ROUTES_PER_PROJECT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Project cannot have more than {MAX_ROUTES_PER_PROJECT} routes. Current: {current_route_count}, attempted to add: {len(to_insert)}. Please remove some routes or split across projects."
+            )
+
     if to_insert:
         logger.debug(f"Inserting {len(to_insert)} new routes into the database.")
         async with get_db_transaction() as conn:
             await conn.executemany(""" 
                 INSERT INTO routes (
-                    uuid, project_id, route_name, origin, destination, waypoints, center,
+                    uuid, project_id, project_uuid, route_name, origin, destination, waypoints, center,
                     route_type, length, encoded_polyline,
                     start_lat, start_lng, end_lat, end_lng,
                     min_lat, max_lat, min_lng, max_lng,
                     tag, original_route_geo_json, match_percentage,
                     is_enabled, sync_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'unsynced')
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'unsynced')
             """, to_insert)
         
         # Log each route creation to Firestore asynchronously (non-blocking)

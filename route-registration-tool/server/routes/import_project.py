@@ -96,6 +96,7 @@ async def import_project_from_zip(zip_bytes: bytes):
             f"Please check your authentication and project permissions."
         )
 
+    project_uuid_val = str(uuid.uuid4())
     try:
         with engine.begin() as conn:
             existing_project = conn.execute(
@@ -105,13 +106,14 @@ async def import_project_from_zip(zip_bytes: bytes):
             if existing_project:
                 project_id = conn.execute(
                     text("""
-                        INSERT INTO projects (project_name, jurisdiction_boundary_geojson, google_cloud_project_id,
+                        INSERT INTO projects (project_uuid, project_name, jurisdiction_boundary_geojson, google_cloud_project_id,
                             google_cloud_project_number, subscription_id, dataset_name, viewstate, map_snapshot)
-                        VALUES (:project_name, :jurisdiction_boundary_geojson, :google_cloud_project_id,
+                        VALUES (:project_uuid, :project_name, :jurisdiction_boundary_geojson, :google_cloud_project_id,
                             :google_cloud_project_number, :subscription_id, :dataset_name, :viewstate, :map_snapshot)
                         RETURNING id;
                     """),
                     {
+                        "project_uuid": project_uuid_val,
                         "project_name": project_name,
                         "jurisdiction_boundary_geojson": jurisdiction_boundary_geojson,
                         "google_cloud_project_id": google_cloud_project_id,
@@ -123,8 +125,9 @@ async def import_project_from_zip(zip_bytes: bytes):
                     },
                 ).scalar()
             else:
-                conn.execute(text(""" INSERT INTO projects (id, project_name, jurisdiction_boundary_geojson, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name, viewstate, map_snapshot) VALUES (:id, :project_name, :jurisdiction_boundary_geojson, :google_cloud_project_id, :google_cloud_project_number, :subscription_id, :dataset_name, :viewstate, :map_snapshot) """), {
+                conn.execute(text(""" INSERT INTO projects (id, project_uuid, project_name, jurisdiction_boundary_geojson, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name, viewstate, map_snapshot) VALUES (:id, :project_uuid, :project_name, :jurisdiction_boundary_geojson, :google_cloud_project_id, :google_cloud_project_number, :subscription_id, :dataset_name, :viewstate, :map_snapshot) """), {
                     "id": project_id,
+                    "project_uuid": project_uuid_val,
                     "project_name": project_name,
                     "jurisdiction_boundary_geojson": jurisdiction_boundary_geojson,
                     "google_cloud_project_id": google_cloud_project_id,
@@ -163,8 +166,9 @@ async def import_project_from_zip(zip_bytes: bytes):
                     route["routes_status"] = "UNSYNCED"
                     uuid_conflicts += 1
 
-                # Ensure the new project ID is used
+                # Ensure the new project ID and project UUID are used
                 route["project_id"] = project_id
+                route["project_uuid"] = project_uuid_val
 
                 # Build dynamic SQL for route insert
                 cols = ", ".join(route.keys())
@@ -179,16 +183,11 @@ async def import_project_from_zip(zip_bytes: bytes):
     except IntegrityError as e:
         error_msg = str(e.orig) if e.orig else str(e)
         logger.error(f"Database integrity error during project import: {error_msg}")
-        # Extract user-friendly message from integrity error
         if "UNIQUE constraint failed" in error_msg:
-            constraint_field = error_msg.split("UNIQUE constraint failed: ")[-1].split(".")[-1] if "." in error_msg else "field"
-            query = f"SELECT project_name FROM projects WHERE google_cloud_project_id = :value AND deleted_at IS NULL"
-            with engine.begin() as conn:
-                project_name = conn.execute(text(query), {"value": google_cloud_project_id}).fetchone()
-            if project_name:
-                    raise ValueError(f"You’re trying to upload a project with a Google Cloud Project ID that’s already in use by '{project_name[0]}'.")
-            else:
-                raise ValueError(f"Database integrity error: {error_msg}")
+            raise ValueError(
+                "A record with this value already exists. "
+                "Check that project name and other unique fields are not duplicated."
+            )
         raise ValueError(f"Database integrity error: {error_msg}")
     except OperationalError as e:
         error_msg = str(e.orig) if e.orig else str(e)

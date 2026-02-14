@@ -223,6 +223,9 @@ def save_route_segments_from_geojson(project_id, tag, feature_collection, count)
     parent_ids = {f["properties"]["parent_route_uuid"] for f in feature_collection["features"]}
 
     with engine.begin() as conn:
+        project_uuid_row = conn.execute(text("SELECT project_uuid FROM projects WHERE id = :id"), {"id": project_id}).fetchone()
+        project_uuid = project_uuid_row[0] if project_uuid_row and project_uuid_row[0] else None
+
         # Fetch all parent route data
         parent_routes = {}
         for parent_uuid in parent_ids:
@@ -249,7 +252,7 @@ def save_route_segments_from_geojson(project_id, tag, feature_collection, count)
             
             conn.execute(text(""" 
                 INSERT INTO routes (
-                    uuid, project_id, route_name, origin, destination, waypoints, center, 
+                    uuid, project_id, project_uuid, route_name, origin, destination, waypoints, center, 
                     encoded_polyline, route_type, length, parent_route_id, has_children, 
                     is_segmented, segmentation_type, segmentation_config, sync_status, is_enabled, 
                     created_at, updated_at, tag, start_lat, start_lng, end_lat, end_lng, 
@@ -257,7 +260,7 @@ def save_route_segments_from_geojson(project_id, tag, feature_collection, count)
                     validation_status
                 )
                 VALUES (
-                    :new_uuid, :project_id, :route_name, :origin, :destination, :waypoints, :center,
+                    :new_uuid, :project_id, :project_uuid, :route_name, :origin, :destination, :waypoints, :center,
                     :encoded_polyline, :route_type, :length, :parent_uuid, 1, 1, 'distance', :cfg,
                     'unsynced', 1, :created, :updated, :tag, :start_lat, :start_lng, :end_lat, :end_lng,
                     :min_lat, :max_lat, :min_lng, :max_lng, :routes_status, :original_route_geo_json,
@@ -266,6 +269,7 @@ def save_route_segments_from_geojson(project_id, tag, feature_collection, count)
             """), {
                 "new_uuid": new_route_uuid,
                 "project_id": parent_route.project_id,
+                "project_uuid": project_uuid,
                 "route_name": parent_route.route_name,
                 "origin": parent_route.origin,
                 "destination": parent_route.destination,
@@ -334,14 +338,15 @@ def save_route_segments_from_geojson(project_id, tag, feature_collection, count)
             segment_uuid = str(uuid.uuid4())
 
             conn.execute(text(""" 
-                INSERT INTO routes (uuid, project_id, route_name, origin, destination, center, encoded_polyline, route_type, length,
+                INSERT INTO routes (uuid, project_id, project_uuid, route_name, origin, destination, center, encoded_polyline, route_type, length,
                     parent_route_id, has_children, is_segmented, sync_status, is_enabled, created_at, updated_at, tag, segment_order
                 )
-                VALUES (:uuid, :pid, :name,:origin, :destination, :center, :encoded, 'segment', :length,
+                VALUES (:uuid, :pid, :project_uuid, :name,:origin, :destination, :center, :encoded, 'segment', :length,
                     :parent, 0, 0, 'unsynced', 1, :created, :updated, :tag, :segment_order)
             """), {
                 "uuid": segment_uuid,
                 "pid": project_id,
+                "project_uuid": project_uuid,
                 "name": route_name,
                 "origin": json.dumps(origin),
                 "destination": json.dumps(destination),

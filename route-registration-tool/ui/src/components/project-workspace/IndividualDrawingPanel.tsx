@@ -140,7 +140,7 @@ const IndividualDrawingPanel: React.FC<IndividualDrawingPanelProps> = ({
         individualRoute.generatedRoute !== null &&
         selectedRoute !== null &&
         individualRoute.generatedRoute.encodedPolyline !==
-          selectedRoute.encodedPolyline
+        selectedRoute.encodedPolyline
 
       const routeIdToCheck =
         editingSavedRouteId || routeUUID || selectedRoute?.id || null
@@ -400,7 +400,7 @@ const IndividualDrawingPanel: React.FC<IndividualDrawingPanelProps> = ({
           route &&
           individualRoute.generatedRoute?.encodedPolyline &&
           route.encodedPolyline !==
-            individualRoute.generatedRoute.encodedPolyline
+          individualRoute.generatedRoute.encodedPolyline
 
         if (routeGeometryChanged) {
           console.log(
@@ -836,8 +836,9 @@ const IndividualDrawingPanel: React.FC<IndividualDrawingPanelProps> = ({
       }
     } catch (error) {
       console.error("❌ Failed to save route:", error)
-      toast.error("Failed to save route. Please try again.")
-      setMapMode("view")
+      const message =
+        error instanceof Error ? error.message : "Failed to save route. Please try again."
+      toast.error(message, { duration: 6000 })
       return
     }
 
@@ -1041,16 +1042,16 @@ const IndividualDrawingPanel: React.FC<IndividualDrawingPanelProps> = ({
           data: {
             type: segmentation.type,
             ...(segmentation.type === "manual" ||
-            segmentation.type === "intersections"
+              segmentation.type === "intersections"
               ? {
-                  cutPoints: segmentation.cutPoints.map((p) => [
-                    p.coordinates.lng,
-                    p.coordinates.lat,
-                  ]),
-                }
+                cutPoints: segmentation.cutPoints.map((p) => [
+                  p.coordinates.lng,
+                  p.coordinates.lat,
+                ]),
+              }
               : {
-                  distanceKm: segmentation.distanceKm,
-                }),
+                distanceKm: segmentation.distanceKm,
+              }),
             segments,
           },
         }

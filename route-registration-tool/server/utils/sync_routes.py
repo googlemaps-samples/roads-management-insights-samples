@@ -98,10 +98,7 @@ logger.addHandler(ch)
 load_dotenv(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 )
-VIEW_MODE = os.getenv("VIEW_MODE")
-if not VIEW_MODE:
-    raise ValueError("VIEW_MODE is not set in the environment variables.")
-
+VIEW_MODE = os.getenv("VIEW_MODE") or "false"
 
 async def run_bq_query(client, sql):
     loop = asyncio.get_event_loop()
@@ -111,19 +108,34 @@ async def run_bq_query(client, sql):
 # -------------------------
 # DATABASE HELPERS
 # -------------------------
-async def bulk_update_deleted_routes(db_project_id, uuids):
-    logger.info(f"Bulk updating deleted routes for project {db_project_id}.")
+async def get_project_uuid(db_project_id: int) -> Optional[str]:
+    """Return project_uuid for the given project id, or None if not found."""
+    try:
+        async with async_engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT project_uuid FROM projects WHERE id = :id AND deleted_at IS NULL"),
+                {"id": db_project_id},
+            )
+            row = result.fetchone()
+            return row[0] if row and row[0] else None
+    except Exception as e:
+        logger.error(f"Error fetching project_uuid for project {db_project_id}: {e}")
+        return None
+
+
+async def bulk_update_deleted_routes(project_uuid: str, uuids):
+    logger.info(f"Bulk updating deleted routes for project_uuid {project_uuid}.")
     if not uuids:
         return
     try:
         async with async_engine.begin() as conn:
             # Logic: Delete from DB once confirmed deleted from API
             query = text(
-                "DELETE FROM routes WHERE project_id = :project_id AND uuid IN :uuids"
+                "DELETE FROM routes WHERE project_uuid = :project_uuid AND uuid IN :uuids"
             ).bindparams(bindparam("uuids", expanding=True))
-            await conn.execute(query, {"project_id": db_project_id, "uuids": uuids})
+            await conn.execute(query, {"project_uuid": project_uuid, "uuids": uuids})
         logger.info(
-            f"Deleted {len(uuids)} routes from DB after API deletion for project {db_project_id}."
+            f"Deleted {len(uuids)} routes from DB after API deletion for project_uuid {project_uuid}."
         )
     except Exception as e:
         logger.error(f"Error deleting routes from DB: {e}")
@@ -186,16 +198,16 @@ async def bulk_update_invalid_routes(invalid_routes: list[dict]):
         logger.error(f"Error marking routes as invalid: {e}")
 
 
-async def fetch_single_route(db_project_id, uuid):
-    logger.info(f"Fetching single route {uuid} for project {db_project_id}.")
+async def fetch_single_route(project_uuid: str, uuid):
+    logger.info(f"Fetching single route {uuid} for project_uuid {project_uuid}.")
     try:
         async with async_engine.begin() as conn:
             query = text("""SELECT uuid, route_name, origin, destination, waypoints, sync_status, length, tag, route_type
-            FROM routes WHERE uuid = :uuid AND project_id = :project_id and is_enabled = 1 and has_children = 0
-            and deleted_at is NULL
+            FROM routes WHERE uuid = :uuid AND project_uuid = :project_uuid AND is_enabled = 1 AND has_children = 0
+            AND deleted_at IS NULL
             """)
             result = await conn.execute(
-                query, {"uuid": uuid, "project_id": db_project_id}
+                query, {"uuid": uuid, "project_uuid": project_uuid}
             )
             return result.fetchall()
     except Exception as e:
@@ -205,29 +217,26 @@ async def fetch_single_route(db_project_id, uuid):
         )
 
 
-async def fetch_all_project_routes(db_project_id: int, tag: Optional[str] = None) -> list[dict]:
+async def fetch_all_project_routes(project_uuid: str, tag: Optional[str] = None) -> list[dict]:
     """
-    Fetches ALL routes for a project from database in a single query.
+    Fetches ALL routes for a project (by project_uuid) from database in a single query.
     Returns list of dicts with: uuid, route_name, origin, destination, waypoints,
     length, tag, route_type, sync_status, deleted_at
-    
-    This replaces the separate fetch_unsynced_validating_routes() and 
-    fetch_deleted_routes_uuids() functions for optimized single-query fetching.
     """
-    logger.info(f"Fetching all routes for project {db_project_id}.")
+    logger.info(f"Fetching all routes for project_uuid {project_uuid}.")
     try:
         query_str = """
-            SELECT uuid, route_name, origin, destination, waypoints, length, tag, 
-                   route_type, sync_status, deleted_at
+            SELECT uuid, route_name, origin, destination, waypoints, length, tag,
+                   route_type, sync_status, deleted_at, project_uuid
             FROM routes
-            WHERE is_enabled = 1 AND has_children = 0 AND project_id = :project_id
+            WHERE is_enabled = 1 AND has_children = 0 AND project_uuid = :project_uuid
         """
         if tag:
             query_str += " AND tag = :tag"
         
         async with async_engine.begin() as conn:
             query = text(query_str)
-            params: dict = {"project_id": db_project_id}
+            params: dict = {"project_uuid": project_uuid}
             if tag:
                 params["tag"] = tag
             result = await conn.execute(query, params)
@@ -499,15 +508,18 @@ def prepare_payload_from_dict(route_dict):
         if wp_list:
             dynamic_route["intermediates"] = wp_list
 
+    route_attrs = {
+        "length": str(route_dict.get("length", 0)),
+        "tag": route_dict.get("tag") if route_dict.get("tag") else "Untagged",
+        "route_type": route_dict.get("route_type", "Existing"),
+        "created_by": "Roads Selection Tool"
+    }
+    if route_dict.get("project_uuid"):
+        route_attrs["project_uuid"] = route_dict["project_uuid"]
     request_obj = {
         "displayName": route_dict["route_name"],
         "dynamicRoute": dynamic_route,
-        "route_attributes": {
-            "length": str(route_dict.get("length", 0)),
-            "tag": route_dict.get("tag") if route_dict.get("tag") else "Untagged",
-            "route_type": route_dict.get("route_type", "Existing"),
-            "created_by": "Roads Selection Tool"
-        }
+        "route_attributes": route_attrs
     }
 
     return request_obj
@@ -895,20 +907,20 @@ async def process_validating_routes_updates(db_project_id, validating_rows, api_
 # -------------------------
 # CORE LOGIC: FETCH (PULL)
 # -------------------------
-async def save_routes_to_db(routes_data, db_project_id, bq_update_map: dict = None):
-    """Parses API response and inserts into DB (skipping existing)."""
-    logger.info(f"Saving routes to database for project {db_project_id}.")
+async def save_routes_to_db(routes_data, db_project_id, project_uuid: str, bq_update_map: dict = None):
+    """Parses API response and inserts into DB (skipping existing). project_uuid identifies the owning project."""
+    logger.info(f"Saving routes to database for project_uuid {project_uuid}.")
     if not routes_data:
         return {"inserted": 0, "skipped": 0}
 
     current_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    # Optimization: Fetch existing UUIDs once
+    # Optimization: Fetch existing UUIDs for this project (skip re-inserting same route in same project)
     try:
         async with async_engine.begin() as conn:
             result = await conn.execute(
-                text("SELECT uuid FROM routes WHERE project_id=:pid"),
-                {"pid": db_project_id},
+                text("SELECT uuid FROM routes WHERE project_uuid = :project_uuid"),
+                {"project_uuid": project_uuid},
             )
             existing = result.fetchall()
             existing_uuids = {row[0] for row in existing}
@@ -1019,6 +1031,7 @@ async def save_routes_to_db(routes_data, db_project_id, bq_update_map: dict = No
                 {
                     "uuid": route_uuid,
                     "project_id": db_project_id,
+                    "project_uuid": project_uuid,
                     "route_name": route.get("displayName", ""),
                     "origin": json.dumps({"lat": coords[0][1], "lng": coords[0][0]}),
                     "destination": json.dumps(
@@ -1064,7 +1077,7 @@ async def save_routes_to_db(routes_data, db_project_id, bq_update_map: dict = No
             async with async_engine.begin() as conn:
                 query = text("""
                     INSERT INTO routes (
-                        uuid, project_id, route_name,
+                        uuid, project_id, project_uuid, route_name,
                         origin, destination, waypoints, center,
                         encoded_polyline, route_type, length,
                         latest_data_update_time,
@@ -1080,7 +1093,7 @@ async def save_routes_to_db(routes_data, db_project_id, bq_update_map: dict = No
                         validation_status, tag
                     )
                     VALUES (
-                        :uuid, :project_id, :route_name,
+                        :uuid, :project_id, :project_uuid, :route_name,
                         :origin, :destination, :waypoints, :center,
                         :encoded_polyline, :route_type, :length,
                         :latest_data_update_time,
@@ -1110,7 +1123,6 @@ async def save_routes_to_db(routes_data, db_project_id, bq_update_map: dict = No
                         "project_id": route_data["project_id"],
                         "route_name": route_data["route_name"],
                         "route_type": route_data.get("route_type", "Existing"),
-                        "length": route_data.get("length"),
                         "tag": route_data.get("tag"),
                         "distance": route_data.get("length"),  # Distance in km
                         "sync_status": route_data.get("sync_status", "synced"),
@@ -1315,220 +1327,219 @@ async def execute_sync(
     if VIEW_MODE == "TRUE":
         logger.info("Running in view mode.")
         return {"status": "success", "message": "Running in view mode."}
-    else:
-        timing_records = []
-        
-        if uuid:
-            logger.info(f"Syncing single route {uuid} for project {db_project_id}.")
-            route = await fetch_single_route(db_project_id, uuid)
-            if route:
-                logger.info(f"Route {uuid} found in database. Syncing to BigQuery.")
-                return await sync_single_route_to_bigquery(
-                    db_project_id, project_number, uuid, route
-                )
-            else:
-                logger.error(f"Route {uuid} not found in database.")
-                return {"status": "error", "message": "Route not found."}
 
-        stats = {}
+    project_uuid = await get_project_uuid(db_project_id)
+    if not project_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail="Project has no project_uuid. Please ensure the project is properly configured.",
+        )
 
-        # OPTIMIZED: Fetch all routes + API data in parallel
+    timing_records = []
+
+    if uuid:
+        logger.info(f"Syncing single route {uuid} for project {db_project_id}.")
+        route = await fetch_single_route(project_uuid, uuid)
+        if route:
+            logger.info(f"Route {uuid} found in database. Syncing to BigQuery.")
+            return await sync_single_route_to_bigquery(
+                db_project_id, project_number, uuid, route
+            )
+        else:
+            logger.error(f"Route {uuid} not found in database.")
+            return {"status": "error", "message": "Route not found."}
+
+    stats = {}
+
+    # OPTIMIZED: Fetch all routes + API data in parallel
+    op_start = time.time()
+    start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    try:
+        # Fetch all routes from database (by project_uuid)
+        all_routes = await fetch_all_project_routes(project_uuid, tag)
+        # Segregate routes into categories (pure Python, no DB calls)
+        deleted_uuids, local_deleted_uuids, validating_rows, unsynced_rows, synced_invalid_rows = segregate_routes(all_routes)
+        logger.info(
+            f"Segregated routes: deleted={len(deleted_uuids)}, local_deleted={len(local_deleted_uuids)}, validating={len(validating_rows)}, "
+            f"unsynced={len(unsynced_rows)}, synced_invalid={len(synced_invalid_rows)}"
+        )
+
+        # Process Local Deletions
+        if local_deleted_uuids:
+            op_start = time.time()
+            start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            logger.info(f"Deleting {len(local_deleted_uuids)} local deleted routes from project.")
+            await bulk_update_deleted_routes(project_uuid, local_deleted_uuids)
+            stats["deleted_local"] = len(local_deleted_uuids)
+            op_end = time.time()
+            end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            timing_records.append({
+                "operation": "Process Local Deletions",
+                "routes_count": len(local_deleted_uuids),
+                "start_time": start_time_str,
+                "end_time": end_time_str,
+                "duration_seconds": op_end - op_start
+            })
+
+        # Process API Deletions
+        if deleted_uuids:
+            op_start = time.time()
+            start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            logger.info(f"Deleting {len(deleted_uuids)} routes from project.")
+            success_dels = await process_deletions(db_project_id, project_number, deleted_uuids)
+            logger.info(
+                f"Successfully deleted {len(success_dels)} routes from project."
+            )
+            await bulk_update_deleted_routes(project_uuid, success_dels)
+            stats["deleted_from_api"] = len(success_dels)
+            op_end = time.time()
+            end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            timing_records.append({
+                "operation": "Process API Deletions",
+                "routes_count": len(deleted_uuids),
+                "start_time": start_time_str,
+                "end_time": end_time_str,
+                "duration_seconds": op_end - op_start
+            })
+
+        # Log sync start with total routes to route operations log
+        log_sync_start(db_project_id, project_number, len(all_routes) if all_routes else 0, tag)
+        routes_list, bq_updates = await asyncio.gather(
+            list_routes(project_number, project_uuid=project_uuid),
+            perform_bq_sync(gcp_project_id, db_project_id, dataset_name),
+        )
+
+        # Build API route map once (reused by multiple processors)
+        api_route_map = build_api_route_map(routes_list)
+        existing_route_ids_set = set(api_route_map.keys())
+
+    except RouteListError as e:
+        # list_routes API call failed - cannot proceed without API state
+        logger.error(f"Failed to list routes from API: {e.message}")
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=f"Failed to fetch routes from Roads API: {e.message}"
+        )
+    except HTTPException:
+        # Re-raise HTTPException from perform_bq_sync or other sources
+        raise
+    except Exception as e:
+        logger.error(f"Failed during parallel fetch: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Sync initialization failed: {str(e)}"
+        )
+    op_end = time.time()
+    end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    timing_records.append({
+        "operation": "Parallel Fetch (API + BQ) and routes deletion",
+        "routes_count": len(all_routes) if all_routes else 0,
+        "start_time": start_time_str,
+        "end_time": end_time_str,
+        "duration_seconds": op_end - op_start
+    })
+
+    # Process Validating Routes
+    if validating_rows:
         op_start = time.time()
         start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        try:
-            # Fetch all routes from database
-            # Parallel fetch: API routes + BQ sync
-            # Note: All three functions now raise exceptions on failure (fail-fast)
-            all_routes = await fetch_all_project_routes(db_project_id, tag)
-            # Segregate routes into categories (pure Python, no DB calls)
-            deleted_uuids, local_deleted_uuids, validating_rows, unsynced_rows, synced_invalid_rows = segregate_routes(all_routes)
-            logger.info(
-                f"Segregated routes: deleted={len(deleted_uuids)}, local_deleted={len(local_deleted_uuids)}, validating={len(validating_rows)}, "
-                f"unsynced={len(unsynced_rows)}, synced_invalid={len(synced_invalid_rows)}"
-            )
-            
-            # Process Local Deletions
-            if local_deleted_uuids:
-                op_start = time.time()
-                start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                logger.info(f"Deleting {len(local_deleted_uuids)} local deleted routes from project.")
-                await bulk_update_deleted_routes(db_project_id, local_deleted_uuids)
-                stats["deleted_local"] = len(local_deleted_uuids)
-                op_end = time.time()
-                end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                timing_records.append({
-                    "operation": "Process Local Deletions",
-                    "routes_count": len(local_deleted_uuids),
-                    "start_time": start_time_str,
-                    "end_time": end_time_str,
-                    "duration_seconds": op_end - op_start
-                })
-            
-            # Process API Deletions
-            if deleted_uuids:
-                op_start = time.time()
-                start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                logger.info(f"Deleting {len(deleted_uuids)} routes from project.")
-                success_dels = await process_deletions(db_project_id, project_number, deleted_uuids)
-                logger.info(
-                    f"Successfully deleted {len(success_dels)} routes from project."
-                )
-                await bulk_update_deleted_routes(db_project_id, success_dels)
-                stats["deleted_from_api"] = len(success_dels)
-                op_end = time.time()
-                end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                timing_records.append({
-                    "operation": "Process API Deletions",
-                    "routes_count": len(deleted_uuids),
-                    "start_time": start_time_str,
-                    "end_time": end_time_str,
-                    "duration_seconds": op_end - op_start
-                })
-
-
-            # Log sync start with total routes to route operations log
-            log_sync_start(db_project_id, project_number, len(all_routes) if all_routes else 0, tag)
-            routes_list, bq_updates = await asyncio.gather(
-                list_routes(project_number),
-                perform_bq_sync(gcp_project_id, db_project_id, dataset_name),
-            )
-            
-            # Build API route map once (reused by multiple processors)
-            api_route_map = build_api_route_map(routes_list)
-            existing_route_ids_set = set(api_route_map.keys())
-            
-        except RouteListError as e:
-            # list_routes API call failed - cannot proceed without API state
-            logger.error(f"Failed to list routes from API: {e.message}")
-            raise HTTPException(
-                status_code=e.status_code,
-                detail=f"Failed to fetch routes from Roads API: {e.message}"
-            )
-        except HTTPException:
-            # Re-raise HTTPException from perform_bq_sync or other sources
-            raise
-        except Exception as e:
-            logger.error(f"Failed during parallel fetch: {e}")
-            raise HTTPException(
-                status_code=502, 
-                detail=f"Sync initialization failed: {str(e)}"
-            )
+        logger.info(f"Updating {len(validating_rows)} validating routes status.")
+        count = await process_validating_routes_updates(
+            db_project_id, validating_rows, api_route_map
+        )
+        logger.info(f"Successfully updated {count} routes status in project.")
+        stats["previously_validated_routes"] = count
         op_end = time.time()
         end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         timing_records.append({
-            "operation": "Parallel Fetch (API + BQ) and routes deletion",
-            "routes_count": len(all_routes) if all_routes else 0,
+            "operation": "Process Validating Routes Updates",
+            "routes_count": len(validating_rows),
             "start_time": start_time_str,
             "end_time": end_time_str,
             "duration_seconds": op_end - op_start
         })
 
-
-        # Process Validating Routes
-        if validating_rows:
-            op_start = time.time()
-            start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            logger.info(f"Updating {len(validating_rows)} validating routes status.")
-            count = await process_validating_routes_updates(
-                db_project_id, validating_rows, api_route_map
-            )
-            logger.info(f"Successfully updated {count} routes status in project.")
-            stats["previously_validated_routes"] = count
-            op_end = time.time()
-            end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            timing_records.append({
-                "operation": "Process Validating Routes Updates",
-                "routes_count": len(validating_rows),
-                "start_time": start_time_str,
-                "end_time": end_time_str,
-                "duration_seconds": op_end - op_start
-            })
-
-        # Push Unsynced (Creation)
-        if unsynced_rows:
-            op_start = time.time()
-            start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            logger.info(f"Pushing {len(unsynced_rows)} routes to project.")
-            count = await process_creations(
-                db_project_id, project_number, unsynced_rows, existing_route_ids_set
-            )
-            logger.info(f"Successfully pushed {count} routes to project.")
-            stats["validating_routes"] = count
-            op_end = time.time()
-            end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            timing_records.append({
-                "operation": "Push Unsynced Routes (Creations)",
-                "routes_count": len(unsynced_rows),
-                "start_time": start_time_str,
-                "end_time": end_time_str,
-                "duration_seconds": op_end - op_start
-            })
-
-        # Verify Synced/Invalid Routes against API
-        if synced_invalid_rows:
-            op_start = time.time()
-            start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            logger.info(f"Verifying {len(synced_invalid_rows)} synced/invalid routes against API.")
-            count = await verify_synced_invalid_routes(
-                synced_invalid_rows, api_route_map
-            )
-            logger.info(f"Updated {count} synced/invalid routes after API verification.")
-            stats["synced_invalid_verified"] = count
-            op_end = time.time()
-            end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            timing_records.append({
-                "operation": "Verify Synced/Invalid Routes",
-                "routes_count": len(synced_invalid_rows),
-                "start_time": start_time_str,
-                "end_time": end_time_str,
-                "duration_seconds": op_end - op_start
-            })
-
-        # Pull & Enrich (Only if doing full project sync, i.e., no tag)
-        if tag is None:
-            op_start = time.time()
-            start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            # Save fetched routes (use bq_updates from parallel fetch)
-            bq_update_map = await build_bq_update_map(bq_updates)
-            save_res = await save_routes_to_db(
-                routes_list, db_project_id, bq_update_map
-            )
-            logger.info(
-                f"Successfully saved {save_res['inserted']} routes to database."
-            )
-            stats["fetched_from_api"] = save_res["inserted"]
-            stats["skipped_from_api"] = save_res["skipped"]
-            stats["bq_updates"] = len(bq_update_map)
-            op_end = time.time()
-            end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            timing_records.append({
-                "operation": "Save Routes to DB + BQ Update Map",
-                "routes_count": save_res["inserted"],
-                "start_time": start_time_str,
-                "end_time": end_time_str,
-                "duration_seconds": op_end - op_start
-            })
-        
-        # Batch update all parent routes' sync statuses at once
+    # Push Unsynced (Creation)
+    if unsynced_rows:
         op_start = time.time()
         start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        parent_update_stats = await batch_update_parent_sync_statuses(db_project_id)
-        stats["parents_updated"] = parent_update_stats.get("parents_updated", 0)
+        logger.info(f"Pushing {len(unsynced_rows)} routes to project.")
+        count = await process_creations(
+            db_project_id, project_number, unsynced_rows, existing_route_ids_set
+        )
+        logger.info(f"Successfully pushed {count} routes to project.")
+        stats["validating_routes"] = count
         op_end = time.time()
         end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         timing_records.append({
-            "operation": "Batch Update Parent Sync Statuses",
-            "routes_count": parent_update_stats.get("parents_found", 0),
+            "operation": "Push Unsynced Routes (Creations)",
+            "routes_count": len(unsynced_rows),
             "start_time": start_time_str,
             "end_time": end_time_str,
             "duration_seconds": op_end - op_start
         })
-        
-        # Write timing log to file
-        # timing_file = _write_timing_log(timing_records, db_project_id, tag)
-        # stats["timing_log_file"] = timing_file
-        
-        # Log sync complete to route operations log
-        log_sync_complete(db_project_id, stats)
-        
-        return stats
+
+    # Verify Synced/Invalid Routes against API
+    if synced_invalid_rows:
+        op_start = time.time()
+        start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        logger.info(f"Verifying {len(synced_invalid_rows)} synced/invalid routes against API.")
+        count = await verify_synced_invalid_routes(
+            synced_invalid_rows, api_route_map
+        )
+        logger.info(f"Updated {count} synced/invalid routes after API verification.")
+        stats["synced_invalid_verified"] = count
+        op_end = time.time()
+        end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        timing_records.append({
+            "operation": "Verify Synced/Invalid Routes",
+            "routes_count": len(synced_invalid_rows),
+            "start_time": start_time_str,
+            "end_time": end_time_str,
+            "duration_seconds": op_end - op_start
+        })
+
+    # Pull & Enrich (Only if doing full project sync, i.e., no tag)
+    if tag is None:
+        op_start = time.time()
+        start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        # Save fetched routes (use bq_updates from parallel fetch)
+        bq_update_map = await build_bq_update_map(bq_updates)
+        save_res = await save_routes_to_db(
+            routes_list, db_project_id, project_uuid, bq_update_map
+        )
+        logger.info(
+            f"Successfully saved {save_res['inserted']} routes to database."
+        )
+        stats["fetched_from_api"] = save_res["inserted"]
+        stats["skipped_from_api"] = save_res["skipped"]
+        stats["bq_updates"] = len(bq_update_map)
+        op_end = time.time()
+        end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        timing_records.append({
+            "operation": "Save Routes to DB + BQ Update Map",
+            "routes_count": save_res["inserted"],
+            "start_time": start_time_str,
+            "end_time": end_time_str,
+            "duration_seconds": op_end - op_start
+        })
+
+    # Batch update all parent routes' sync statuses at once
+    op_start = time.time()
+    start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    parent_update_stats = await batch_update_parent_sync_statuses(db_project_id)
+    stats["parents_updated"] = parent_update_stats.get("parents_updated", 0)
+    op_end = time.time()
+    end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    timing_records.append({
+        "operation": "Batch Update Parent Sync Statuses",
+        "routes_count": parent_update_stats.get("parents_found", 0),
+        "start_time": start_time_str,
+        "end_time": end_time_str,
+        "duration_seconds": op_end - op_start
+    })
+
+    # Log sync complete to route operations log
+    log_sync_complete(db_project_id, stats)
+
+    return stats

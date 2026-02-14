@@ -31,6 +31,8 @@ logger = logging.getLogger("routes_api")
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
 
+MAX_ROUTES_PER_PROJECT = 1000
+
 # --------------------------
 # Pydantic Models (Frontend Compatible)
 # --------------------------
@@ -1044,6 +1046,19 @@ async def save_route(route_data: RouteSaveRequest, background_tasks: BackgroundT
         else:
             # Create new route
             logger.info(f"Creating new route with UUID: {route_data.uuid}")
+
+            # Enforce max routes per project (1000)
+            count_row = await query_db(
+                "SELECT COUNT(*) AS cnt FROM routes WHERE project_id = ? AND deleted_at IS NULL",
+                (route_data.region_id,),
+                one=True
+            )
+            current_route_count = (count_row["cnt"] or 0) if count_row else 0
+            if current_route_count >= MAX_ROUTES_PER_PROJECT:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Project cannot have more than {MAX_ROUTES_PER_PROJECT} routes. Current count: {current_route_count}. Please remove some routes or use a different project."
+                )
             
             # Prepare original_route_geo_json for storage
             original_geojson_str = None
@@ -1053,21 +1068,29 @@ async def save_route(route_data: RouteSaveRequest, background_tasks: BackgroundT
                 else:
                     original_geojson_str = json.dumps(route_data.original_route_geo_json)
             
+            project_row = await query_db(
+                "SELECT project_uuid FROM projects WHERE id = ? AND deleted_at IS NULL",
+                (route_data.region_id,),
+                one=True
+            )
+            project_uuid = project_row["project_uuid"] if project_row and "project_uuid" in project_row.keys() and project_row["project_uuid"] else None
+
             insert_query = """
             INSERT INTO routes (
-                uuid, project_id, route_name, origin, destination, waypoints, center,
-                route_type, length, encoded_polyline, 
+                uuid, project_id, project_uuid, route_name, origin, destination, waypoints, center,
+                route_type, length, encoded_polyline,
                 start_lat, start_lng, end_lat, end_lng,
                 min_lat, max_lat, min_lng, max_lng,
                 sync_status, is_enabled, tag, original_route_geo_json, match_percentage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-            
+
             await query_db(
                 insert_query,
                 (
                     route_data.uuid,
-                    route_data.region_id,  # Map region_id to project_id
+                    route_data.region_id,
+                    project_uuid,
                     route_data.route_name,
                     json.dumps({"lat": route_data.coordinates.origin[1], "lng": route_data.coordinates.origin[0]}),
                     json.dumps({"lat": route_data.coordinates.destination[1], "lng": route_data.coordinates.destination[0]}),
@@ -1470,26 +1493,41 @@ async def get_project_route_count(project_id: int):
 # Bulk Project Route Counts endpoint
 @router.get("/projects/counts")
 async def get_projects_route_counts(project_ids: str = Query(..., description="Comma-separated list of project IDs")):
-    """Return route counts for multiple projects in one call"""
+    """Return route counts for the requested projects only."""
     try:
-        # Query to get counts for all projects at once
-        query = """
-        select project_id,
+        # Parse and validate project_ids
+        raw_ids = [s.strip() for s in project_ids.split(",") if s.strip()]
+        if not raw_ids:
+            return {"success": True, "data": {}, "allCounts": {}}
+        id_list = []
+        for s in raw_ids:
+            try:
+                id_list.append(int(s))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid project IDs format. Expected comma-separated integers.",
+                )
+        if not id_list:
+            return {"success": True, "data": {}, "allCounts": {}}
+
+        placeholders = ",".join("?" for _ in id_list)
+        query = f"""
+        SELECT project_id,
         COUNT(CASE WHEN parent_route_id IS NULL AND deleted_at IS NULL THEN 1 END) AS routes_count,
         COUNT(CASE WHEN parent_route_id IS NOT NULL AND deleted_at IS NULL THEN 1 END) AS segment_count
-        from routes
-        where project_id in (
-        select id from projects where deleted_at is null
-        )
-        group by project_id;
+        FROM routes
+        WHERE project_id IN ({placeholders})
+        GROUP BY project_id;
         """
-        rows = await query_db(query)
-        
-        # Create a dictionary mapping project_id (as string) to count
+        rows = await query_db(query, tuple(id_list))
+
         counts_dict = {str(row["project_id"]): row["routes_count"] for row in rows}
         all_counts_dict = {str(row["project_id"]): (row["routes_count"], row["segment_count"]) for row in rows}
 
         return {"success": True, "data": counts_dict, "allCounts": all_counts_dict}
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.error(f"Invalid project IDs format: {str(e)}")
         raise HTTPException(status_code=400, detail="Invalid project IDs format. Expected comma-separated integers.")
