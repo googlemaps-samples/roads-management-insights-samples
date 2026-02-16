@@ -20,6 +20,9 @@ COPY ui/ ./
 RUN npm install
 RUN npm run build
 
+# Copy the package-lock.json file (Add this line)
+COPY ui/package-lock.json ./ui/package-lock.json
+
 
 # Stage 2: Build the Python backend
 FROM python:3.12-slim
@@ -48,6 +51,9 @@ COPY . .
 
 # Copy the built frontend
 COPY --from=build-ui /app/ui/dist ./ui/dist
+
+# Copy the package-lock.json to the backend directory
+COPY --from=build-ui /app/ui/package-lock.json ./ui/package-lock.json
 
 # Expose the port and run the application
 EXPOSE 8080
