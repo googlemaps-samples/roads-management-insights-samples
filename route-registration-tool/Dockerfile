@@ -6,8 +6,6 @@ COPY ./ui /app/ui
 RUN npm install
 RUN npm run build
 
-# Copy the package-lock.json file to the correct location
-COPY ui/package-lock.json /app/ui/package-lock.json
 
 
 # Stage 2: Build the Python backend
