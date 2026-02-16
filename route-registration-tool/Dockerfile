@@ -1,7 +1,8 @@
 # Stage 1: Build the React frontend
 FROM node:20-slim AS build-ui
 WORKDIR /app/ui
-COPY ui/ ./           # Copy all files from ui/
+# Copy all files from ui/
+COPY ./ui /app/ui
 RUN npm install
 RUN npm run build
 
