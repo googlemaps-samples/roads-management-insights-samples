@@ -35,6 +35,7 @@ from .google_roads_api import (
     list_routes,
     delete_route,
     create_route,
+    get_route,
     _ac,
     get_cached_oauth_token,
     invalidate_token_cache,
@@ -160,6 +161,47 @@ async def bulk_update_synced_routes(route_states):
         logger.error(f"Error updating synced status: {e}")
 
 
+async def bulk_update_routes_status_from_api(
+    db_project_id: int,
+    updates: list[dict],
+):
+    """
+    Updates routes table with (routes_status, sync_status, validation_status) from API.
+    Used when we skip creation because the route already exists in API with running/failed status.
+    updates: list of {"uuid", "route_name", "r_status", "s_status", "v_status"}
+    """
+    if not updates:
+        return
+    try:
+        async with async_engine.begin() as conn:
+            db_updates = [
+                {"uuid": u["uuid"], "r_status": u["r_status"], "s_status": u["s_status"], "v_status": u.get("v_status")}
+                for u in updates
+            ]
+            query = text("""
+                UPDATE routes
+                SET routes_status = :r_status,
+                    sync_status = :s_status,
+                    validation_status = :v_status,
+                    updated_at = CURRENT_TIMESTAMP,
+                    synced_at = CURRENT_TIMESTAMP
+                WHERE uuid = :uuid
+            """)
+            await conn.execute(query, db_updates)
+        for u in updates:
+            log_validation_update(
+                db_project_id,
+                uuid=u["uuid"],
+                route_name=u.get("route_name"),
+                old_status="unsynced",
+                new_status=u["s_status"],
+                routes_status=u["r_status"],
+            )
+        logger.info(f"Updated {len(updates)} routes (already running/failed in API, skipped creation).")
+    except Exception as e:
+        logger.error(f"Error updating routes status from API: {e}")
+
+
 async def bulk_update_invalid_routes(invalid_routes: list[dict]):
     """
     Marks routes as 'invalid' in database when they fail with 400 INVALID_ARGUMENT errors.
@@ -253,8 +295,8 @@ def segregate_routes(all_routes: list[dict]) -> tuple[list, list, list, list, li
     - deleted_uuids: routes with deleted_at IS NOT NULL (and sync_status in synced/validating/invalid)
     - local_deleted_uuids: routes with deleted_at IS NOT NULL (and sync_status as unsynced)
     - validating_rows: sync_status = 'validating' (and not deleted)
-    - unsynced_rows: sync_status = 'unsynced' (and not deleted)
-    - synced_invalid_rows: sync_status IN ('synced', 'invalid') (and not deleted)
+    - unsynced_rows: sync_status = 'unsynced' or 'invalid' (and not deleted) — invalid are retried on sync
+    - synced_invalid_rows: sync_status = 'synced' only (and not deleted)
     
     Returns: (deleted_uuids, local_deleted_uuids, validating_rows, unsynced_rows, synced_invalid_rows)
     """
@@ -274,9 +316,10 @@ def segregate_routes(all_routes: list[dict]) -> tuple[list, list, list, list, li
                 local_deleted_uuids.append(row["uuid"])
         elif row["sync_status"] == "validating":
             validating_rows.append(row)
-        elif row["sync_status"] == "unsynced":
+        elif row["sync_status"] == "unsynced" or row["sync_status"] == "invalid":
+            # Include invalid (failed) routes so they are retried on tag sync or sync all
             unsynced_rows.append(row)
-        elif row["sync_status"] in ("synced", "invalid"):
+        elif row["sync_status"] == "synced":
             synced_invalid_rows.append(row)
     
     return deleted_uuids, local_deleted_uuids, validating_rows, unsynced_rows, synced_invalid_rows
@@ -345,7 +388,14 @@ async def verify_synced_invalid_routes(synced_invalid_rows: list[dict], api_rout
                     "v_status": val_error,
                 })
         else:
-            # Route missing from API - reset to unsynced
+            # Route missing from API. Do not reset routes already in terminal state
+            # (synced/invalid) to avoid tag-sync listing quirks flipping them back to unsynced.
+            if db_sync_status in ("synced", "invalid"):
+                logger.debug(
+                    f"Route {db_uuid} not in API list but has terminal status {db_sync_status}; "
+                    "skipping reset to unsynced."
+                )
+                continue
             updates_missing.append({
                 "uuid": db_uuid,
             })
@@ -644,8 +694,42 @@ async def _run_creation_batch(db_project_id, project_number, routes_to_create, c
             error_code = result_dict["error_code"]
             error_message = result_dict["error_message"]
             is_retryable = result_dict["is_retryable"]
-            
-            if error_code == 400:
+
+            if error_code == 409 or "already exists" in (error_message or "").lower():
+                # 409 / already exists: route exists in API; fetch its status and update table
+                try:
+                    existing_route = await get_route(project_number, uuid)
+                    if existing_route:
+                        state = existing_route.get("state", "STATE_UNSPECIFIED")
+                        route_states[uuid] = state
+                        log_creation_success(
+                            db_project_id, uuid, route_name, attempt, state,
+                        )
+                        logger.info(
+                            f"Route {uuid} already existed in API; fetched state={state} and will update table."
+                        )
+                    else:
+                        invalid_routes.append({
+                            **route_dict,
+                            "error_code": error_code,
+                            "error_message": error_message,
+                        })
+                        log_creation_failed(
+                            db_project_id, uuid, route_name, attempt,
+                            f"Error {error_code}: {error_message} - get_route returned None - Will not retry"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to get existing route {uuid} after 409: {e}")
+                    invalid_routes.append({
+                        **route_dict,
+                        "error_code": error_code,
+                        "error_message": error_message,
+                    })
+                    log_creation_failed(
+                        db_project_id, uuid, route_name, attempt,
+                        f"Error {error_code}: {error_message} - get_route failed - Will not retry"
+                    )
+            elif error_code == 400:
                 # 400 INVALID_ARGUMENT - mark as invalid, no retry
                 invalid_routes.append({
                     **route_dict,
@@ -1459,25 +1543,49 @@ async def execute_sync(
             "duration_seconds": op_end - op_start
         })
 
-    # Push Unsynced (Creation)
+    # Push Unsynced + Invalid (Creation) — skip only routes that already exist in API with RUNNING status
+    # Invalid (failed) routes are retried: they go to to_create and get deleted then re-created
     if unsynced_rows:
-        op_start = time.time()
-        start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        logger.info(f"Pushing {len(unsynced_rows)} routes to project.")
-        count = await process_creations(
-            db_project_id, project_number, unsynced_rows, existing_route_ids_set
-        )
-        logger.info(f"Successfully pushed {count} routes to project.")
-        stats["validating_routes"] = count
-        op_end = time.time()
-        end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        timing_records.append({
-            "operation": "Push Unsynced Routes (Creations)",
-            "routes_count": len(unsynced_rows),
-            "start_time": start_time_str,
-            "end_time": end_time_str,
-            "duration_seconds": op_end - op_start
-        })
+        to_create = []
+        already_running = []
+        for row in unsynced_rows:
+            uuid = row["uuid"]
+            if uuid in existing_route_ids_set:
+                r_status, val_error = api_route_map.get(uuid, (None, None))
+                # Only skip creation when already RUNNING; retry failed (STATUS_INVALID) routes
+                if r_status == "STATUS_RUNNING":
+                    already_running.append({
+                        "uuid": uuid,
+                        "route_name": row.get("route_name"),
+                        "r_status": r_status,
+                        "s_status": "synced",
+                        "v_status": val_error,
+                    })
+                    continue
+            to_create.append(row)
+        if already_running:
+            await bulk_update_routes_status_from_api(db_project_id, already_running)
+            logger.info(
+                f"Skipped creation for {len(already_running)} routes (already running in API)."
+            )
+        if to_create:
+            op_start = time.time()
+            start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            logger.info(f"Pushing {len(to_create)} routes to project.")
+            count = await process_creations(
+                db_project_id, project_number, to_create, existing_route_ids_set
+            )
+            logger.info(f"Successfully pushed {count} routes to project.")
+            stats["validating_routes"] = count
+            op_end = time.time()
+            end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            timing_records.append({
+                "operation": "Push Unsynced Routes (Creations)",
+                "routes_count": len(to_create),
+                "start_time": start_time_str,
+                "end_time": end_time_str,
+                "duration_seconds": op_end - op_start
+            })
 
     # Verify Synced/Invalid Routes against API
     if synced_invalid_rows:
