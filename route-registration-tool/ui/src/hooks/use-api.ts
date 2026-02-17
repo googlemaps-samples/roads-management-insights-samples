@@ -1010,12 +1010,17 @@ export const useSyncRoute = () => {
         useLayerStore.getState().refreshRoutesTilesTimestamp
       refreshRoutesTilesTimestamp()
 
-      // Show success toast
-      const details = data.details
+      // Show toast based on actual outcome (details may indicate error for single-route sync)
+      const details = data.details as { status?: string; message?: string }
       if (details.message === "Running in view mode.") {
         toast.info("This project is in view-only mode. Syncing is disabled.", {
           duration: 5000,
         })
+        return
+      }
+
+      if (details.status === "error") {
+        toast.error(details.message ?? "Route sync failed", { duration: 5000 })
         return
       }
 
