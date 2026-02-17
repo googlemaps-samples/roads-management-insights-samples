@@ -17,6 +17,7 @@
 import logging
 import math
 import json
+import os
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
@@ -31,7 +32,7 @@ logger = logging.getLogger("routes_api")
 
 router = APIRouter(prefix="/routes", tags=["Routes"])
 
-MAX_ROUTES_PER_PROJECT = 1000
+MAX_ROUTES_PER_PROJECT = int(os.getenv("MAX_ROUTES_PER_PROJECT", "1000"))
 
 # --------------------------
 # Pydantic Models (Frontend Compatible)

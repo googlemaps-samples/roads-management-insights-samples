@@ -19,6 +19,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 import logging
+import os
 from shapely.geometry import LineString, shape
 from pyproj import Proj
 
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/routes", tags=["Batch Save"])
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-MAX_ROUTES_PER_PROJECT = 1000
+MAX_ROUTES_PER_PROJECT = int(os.getenv("MAX_ROUTES_PER_PROJECT", "1000"))
 
 wgs84 = Proj(init="epsg:4326")
 utm = Proj(init="epsg:32633")
