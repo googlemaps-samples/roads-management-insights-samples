@@ -99,13 +99,54 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
 
 ## Deployment
 
-### Deploy to Google Cloud Run
+### Option 1: Secured Deployment (Recommended)
 
+#### Automated via Cloud Build
+This project includes a `cloudbuild.yaml` file to automate deployment with security best practices:
 ```bash
-gcloud run deploy route-registration-tool --project=your-google-cloud-project-id --region=us-central1 --source . --allow-unauthenticated --platform managed --service-account=your-service-account-gmail --max-instances=1 --min-instances=1
+gcloud builds submit --config cloudbuild.yaml --substitutions=_GOOGLE_API_KEY=YOUR_API_KEY .
+```
+*(Replace `YOUR_API_KEY` with your actual Google Maps API Key)*
+
+#### Manual via CLI
+```bash
+gcloud run deploy route-registration-tool \
+  --project=your-google-cloud-project-id \
+  --region=us-central1 \
+  --source . \
+  --no-allow-unauthenticated \
+  --platform managed \
+  --service-account=your-service-account-email \
+  --max-instances=1 \
+  --min-instances=0
 ```
 
-- Replace `your-google-cloud-project-id` and `your-service-account-gmail` as needed.
-- Service account needs following permissions:
-  - roles/bigquery.dataViewer
-  - roles/bigquery.jobUser
+#### Accessing the Secured Service
+Since the service is deployed with `--no-allow-unauthenticated`, you must use a proxy to access it from your local machine:
+```bash
+gcloud run services proxy route-registration-tool --region us-central1 --port 8081
+```
+Then, open your browser and navigate to: **http://localhost:8081**
+
+### Option 2: Public Access Deployment (For Demos Only)
+
+If you need the service to be publicly accessible without authentication (accessible directly via the Cloud Run URL):
+
+```bash
+gcloud run deploy route-registration-tool \
+  --project=your-google-cloud-project-id \
+  --region=us-central1 \
+  --source . \
+  --allow-unauthenticated \
+  --platform managed \
+  --service-account=your-service-account-email \
+  --max-instances=1 \
+  --min-instances=0
+```
+
+### Required Permissions
+The Service Account used for deployment needs the following roles:
+- `roles/bigquery.dataViewer`
+- `roles/bigquery.jobUser`
+- `roles/datastore.user` (if Firestore logging is enabled)
+- `roles/logging.logWriter`
