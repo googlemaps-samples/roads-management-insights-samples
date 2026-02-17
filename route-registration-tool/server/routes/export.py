@@ -37,6 +37,7 @@ def export_project_with_routes_as_bytes(project_id: int) -> io.BytesIO:
         project = conn.execute(text("""
             SELECT 
                 id,
+                project_uuid,
                 project_name,
                 jurisdiction_boundary_geojson,
                 google_cloud_project_id,

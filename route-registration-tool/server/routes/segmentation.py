@@ -77,6 +77,14 @@ async def apply_segmentation(route_uuid: str, segmentation_data: SegmentationReq
             
             if not original_route_row:
                 raise HTTPException(status_code=404, detail="Route not found")
+
+            project_uuid_row = await query_db(
+                "SELECT project_uuid FROM projects WHERE id = ? AND deleted_at IS NULL",
+                (original_route_row["project_id"],),
+                conn=conn,
+                one=True
+            )
+            project_uuid = project_uuid_row["project_uuid"] if project_uuid_row and "project_uuid" in project_uuid_row.keys() and project_uuid_row["project_uuid"] else None
             
             # Step 0.5: Create new route UUID for the copy
             new_route_uuid = str(uuid.uuid4())
@@ -121,7 +129,7 @@ async def apply_segmentation(route_uuid: str, segmentation_data: SegmentationReq
             
             insert_new_route_query = """
             INSERT INTO routes (
-                uuid, project_id, route_name, origin, destination, waypoints, center,
+                uuid, project_id, project_uuid, route_name, origin, destination, waypoints, center,
                 encoded_polyline, route_type, length, parent_route_id, has_children,
                 is_segmented, segmentation_type, segmentation_points, segmentation_config,
                 sync_status, synced_at, is_enabled, tag, original_route_geo_json, match_percentage,
@@ -129,14 +137,15 @@ async def apply_segmentation(route_uuid: str, segmentation_data: SegmentationReq
                 min_lat, max_lat, min_lng, max_lng, latest_data_update_time,
                 static_duration_seconds, current_duration_seconds, validation_status, traffic_status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-            
+
             await query_db(
                 insert_new_route_query,
                 (
-                    new_route_uuid,  # New UUID
+                    new_route_uuid,
                     original_route_row["project_id"],
+                    project_uuid,
                     original_route_row["route_name"],
                     original_route_row["origin"],
                     original_route_row["destination"],
@@ -245,18 +254,19 @@ async def apply_segmentation(route_uuid: str, segmentation_data: SegmentationReq
                 # Create child route with segment_order
                 insert_child_route_query = """
                 INSERT INTO routes (
-                    uuid, project_id, route_name, origin, destination, waypoints, center,
+                    uuid, project_id, project_uuid, route_name, origin, destination, waypoints, center,
                     encoded_polyline, route_type, length, parent_route_id, has_children,
                     is_segmented, segmentation_type, sync_status, is_enabled, segment_order, tag
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
-                
+
                 await query_db(
                     insert_child_route_query,
                     (
                         child_route_uuid,
                         route.project_id,
+                        project_uuid,
                         segment_name,  # Use custom name or auto-generated name
                         origin,
                         destination,

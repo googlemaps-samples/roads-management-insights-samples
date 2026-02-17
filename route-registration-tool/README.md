@@ -58,7 +58,32 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
     - Copy `.env.example` into a file called `.env`.
     - Open the `.env` file and set Google API key there.
 
-5. **Build and Deploy Docker Container (Local Deployment Only)**
+5.  **Run the application locally**
+
+    From the `route-registration-tool` directory:
+
+    1. Install UI dependencies and build the frontend:
+
+       ```bash
+       cd ui
+       npm i
+       npm run build
+       cd ..
+       ```
+
+    2. Set environment variables (if not done already):
+       - Copy `.env.example` to `.env` in the `route-registration-tool` folder.
+       - Edit `.env` and set your Google API key and any other required variables.
+
+    3. Start the server from the `route-registration-tool` folder:
+
+       ```bash
+       poetry run uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
+       ```
+
+    The application will be available at `http://localhost:8000`.
+
+6. **Build and Deploy Docker Container (Local Deployment Only)**
 
   *Note: This step is only necessary if you want to deploy the container locally.*
 

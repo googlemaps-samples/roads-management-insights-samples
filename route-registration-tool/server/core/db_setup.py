@@ -15,6 +15,9 @@
 
 import sqlite3
 import logging
+import uuid as uuid_module
+
+from server.db.database import DB
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +29,7 @@ def column_exists(cursor, table_name: str, column_name: str) -> bool:
     return column_name in columns
 
 def init_db():
-    conn = sqlite3.connect("my_database.db")
+    conn = sqlite3.connect(DB)
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
 
@@ -89,6 +92,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_uuid TEXT,
         project_name TEXT NOT NULL,
         jurisdiction_boundary_geojson TEXT NOT NULL,
         google_cloud_project_id TEXT,
@@ -102,6 +106,24 @@ def init_db():
         deleted_at DATETIME
     )
     """)
+
+    # Add project_uuid column if it doesn't exist and backfill for existing rows
+    if not column_exists(cursor, "projects", "project_uuid"):
+        try:
+            cursor.execute("ALTER TABLE projects ADD COLUMN project_uuid TEXT;")
+            conn.commit()
+            logger.info("✅ Added project_uuid column to projects table")
+        except sqlite3.OperationalError as e:
+            logger.error(f"⚠️ Could not add project_uuid column: {e}")
+            pass
+    # Backfill project_uuid for any project that doesn't have one
+    cursor.execute("SELECT id FROM projects WHERE project_uuid IS NULL OR project_uuid = ''")
+    for row in cursor.fetchall():
+        cursor.execute(
+            "UPDATE projects SET project_uuid = ? WHERE id = ?",
+            (str(uuid_module.uuid4()), row[0]),
+        )
+    conn.commit()
     
     # Create unique indexes for projects table
     cursor.execute("""
@@ -109,15 +131,6 @@ def init_db():
     ON projects(project_name) 
     WHERE deleted_at IS NULL
     """)
-    
-    # Only create index on google_cloud_project_id if the column exists
-    # (it may not exist if migration 006 hasn't been run yet)
-    if column_exists(cursor, "projects", "google_cloud_project_id"):
-        cursor.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_gcp_id_unique 
-        ON projects(google_cloud_project_id) 
-        WHERE deleted_at IS NULL AND google_cloud_project_id IS NOT NULL AND google_cloud_project_id != ''
-        """)
     
     # Add dataset_name column if it doesn't exist (for existing databases)
     if not column_exists(cursor, "projects", "dataset_name"):
@@ -149,8 +162,10 @@ def init_db():
     # ---------------------
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS routes (
-        uuid TEXT PRIMARY KEY NOT NULL,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL,
         project_id INTEGER NOT NULL,
+        project_uuid TEXT,
         route_name TEXT NOT NULL,
         origin TEXT NOT NULL, -- JSON {lat, lng}
         destination TEXT NOT NULL, -- JSON {lat, lng}
@@ -159,7 +174,7 @@ def init_db():
         encoded_polyline TEXT,
         route_type TEXT, -- 'individual' | 'polygon_import' | 'polygon_combined'
         length REAL,
-        parent_route_id TEXT, -- self reference
+        parent_route_id TEXT, -- self reference (logical; no FK so same uuid can exist in multiple projects)
         has_children BOOLEAN DEFAULT FALSE, -- true if this route is parent of children
         is_segmented BOOLEAN DEFAULT FALSE,
         segmentation_type TEXT, -- 'manual' | 'distance' | 'intersections'
@@ -175,11 +190,25 @@ def init_db():
         temp_geometry TEXT, -- Temporary geometry for undo/redo functionality
         validation_status TEXT,
         traffic_status TEXT,
-        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-        FOREIGN KEY(parent_route_id) REFERENCES routes(uuid) ON DELETE SET NULL
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
     """)
     
+    # Add project_uuid column to routes if it doesn't exist and backfill from projects
+    if not column_exists(cursor, "routes", "project_uuid"):
+        try:
+            cursor.execute("ALTER TABLE routes ADD COLUMN project_uuid TEXT;")
+            conn.commit()
+            logger.info("✅ Added project_uuid column to routes table")
+        except sqlite3.OperationalError as e:
+            logger.error(f"⚠️ Could not add project_uuid column to routes: {e}")
+            pass
+    cursor.execute("""
+        UPDATE routes SET project_uuid = (SELECT project_uuid FROM projects WHERE projects.id = routes.project_id)
+        WHERE project_uuid IS NULL OR project_uuid = ''
+    """)
+    conn.commit()
+
     # Add original_route_geo_json column if it doesn't exist (for existing databases)
     if not column_exists(cursor, "routes", "original_route_geo_json"):
         try:
@@ -209,6 +238,76 @@ def init_db():
         except sqlite3.OperationalError as e:
             logger.error(f"⚠️ Could not add match_percentage column: {e}")
             pass
+
+    # Migrate routes from uuid-as-PK to id-as-PK (allow duplicate uuid across projects)
+    if column_exists(cursor, "routes", "uuid") and not column_exists(cursor, "routes", "id"):
+        try:
+            logger.info("Migrating routes table: uuid no longer primary key, adding id.")
+            cursor.execute("""
+                CREATE TABLE routes_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid TEXT NOT NULL,
+                    project_id INTEGER NOT NULL,
+                    route_name TEXT NOT NULL,
+                    origin TEXT NOT NULL,
+                    destination TEXT NOT NULL,
+                    waypoints TEXT,
+                    center TEXT,
+                    encoded_polyline TEXT,
+                    route_type TEXT,
+                    length REAL,
+                    parent_route_id TEXT,
+                    has_children BOOLEAN DEFAULT FALSE,
+                    is_segmented BOOLEAN DEFAULT FALSE,
+                    segmentation_type TEXT,
+                    segmentation_points TEXT,
+                    segmentation_config TEXT,
+                    sync_status TEXT DEFAULT 'unsynced',
+                    is_enabled BOOLEAN DEFAULT TRUE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at DATETIME,
+                    tag TEXT,
+                    start_lat REAL, start_lng REAL, end_lat REAL, end_lng REAL,
+                    min_lat REAL, max_lat REAL, min_lng REAL, max_lng REAL,
+                    latest_data_update_time DATETIME,
+                    static_duration_seconds REAL,
+                    current_duration_seconds REAL,
+                    routes_status TEXT,
+                    synced_at DATETIME,
+                    original_route_geo_json TEXT,
+                    match_percentage REAL,
+                    temp_geometry TEXT,
+                    validation_status TEXT,
+                    traffic_status TEXT,
+                    segment_order INTEGER,
+                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("PRAGMA table_info(routes)")
+            old_cols = [row[1] for row in cursor.fetchall()]
+            new_cols_no_id = [
+                "uuid", "project_id", "route_name", "origin", "destination", "waypoints", "center",
+                "encoded_polyline", "route_type", "length", "parent_route_id", "has_children", "is_segmented",
+                "segmentation_type", "segmentation_points", "segmentation_config", "sync_status", "is_enabled",
+                "created_at", "updated_at", "deleted_at", "tag",
+                "start_lat", "start_lng", "end_lat", "end_lng",
+                "min_lat", "max_lat", "min_lng", "max_lng",
+                "latest_data_update_time", "static_duration_seconds", "current_duration_seconds",
+                "routes_status", "synced_at", "original_route_geo_json", "match_percentage",
+                "temp_geometry", "validation_status", "traffic_status", "segment_order"
+            ]
+            copy_cols = [c for c in new_cols_no_id if c in old_cols]
+            if copy_cols:
+                cols_str = ", ".join(copy_cols)
+                cursor.execute(f"INSERT INTO routes_new ({cols_str}) SELECT {cols_str} FROM routes")
+            cursor.execute("DROP TABLE routes")
+            cursor.execute("ALTER TABLE routes_new RENAME TO routes")
+            conn.commit()
+            logger.info("✅ Migrated routes table to id primary key; uuid may repeat across projects.")
+        except sqlite3.OperationalError as e:
+            logger.error(f"⚠️ Routes migration failed: {e}")
+            conn.rollback()
 
     # ---------------------
     # Roads

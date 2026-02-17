@@ -16,10 +16,11 @@
 import logging
 import os
 import json
+from typing import Optional
 from dotenv import load_dotenv
 from .create_engine import async_engine
 from sqlalchemy import text
-from .google_roads_api import get_route, delete_route, create_route, prepare_payload_single
+from .google_roads_api import get_route, delete_route, create_route, prepare_payload_single, RouteCreationError
 from .compute_parent_sync_status import update_parent_sync_status, get_parent_route_uuid
 
 # -------------------------
@@ -36,13 +37,26 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
-VIEW_MODE = os.getenv('VIEW_MODE')
-if not VIEW_MODE:
-    raise ValueError("VIEW_MODE is not set in the environment variables.")
+VIEW_MODE = os.getenv('VIEW_MODE') or "false"
 
 # -------------------------
 # DATABASE HELPERS
 # -------------------------
+async def get_project_uuid(db_project_id: int) -> Optional[str]:
+    """Return project_uuid for the given project id, or None if not found."""
+    try:
+        async with async_engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT project_uuid FROM projects WHERE id = :id AND deleted_at IS NULL"),
+                {"id": db_project_id},
+            )
+            row = result.fetchone()
+            return row[0] if row and row[0] else None
+    except Exception as e:
+        logger.error(f"Error fetching project_uuid for project {db_project_id}: {e}")
+        return None
+
+
 async def update_deleted_route(db_project_id, uuid):
     try:
         async with async_engine.begin() as conn:
@@ -96,11 +110,34 @@ async def update_validating_route(db_project_id, uuid, status, route_status, val
     except Exception as e:
         logger.error(f"Error in update_validating_route (uuid {uuid}): {e}")
 
+
+async def update_route_failed(db_project_id, uuid, error_message, error_code=400):
+    """Mark route as failed/invalid in DB when creation fails (e.g. 400 INVALID_ARGUMENT)."""
+    try:
+        async with async_engine.begin() as conn:
+            query = text("""
+                UPDATE routes
+                SET sync_status = 'invalid',
+                    routes_status = 'STATUS_INVALID',
+                    validation_status = :error_message,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE project_id = :project_id AND uuid = :uuid
+            """)
+            await conn.execute(query, {
+                "project_id": db_project_id,
+                "uuid": uuid,
+                "error_message": f"Creation failed ({error_code}): {error_message}",
+            })
+        logger.info(f"Updated route {uuid} to failed/invalid for project {db_project_id}.")
+    except Exception as e:
+        logger.error(f"Error in update_route_failed (uuid {uuid}): {e}")
+
 # -------------------------
 # MAIN FLOW
 # -------------------------
 async def sync_single_route_to_bigquery(db_project_id, project_number, uuid, route):
-    payload = await prepare_payload_single(route)
+    project_uuid = await get_project_uuid(db_project_id)
+    payload = await prepare_payload_single(route, project_uuid=project_uuid)
     # Debug logging removed - use logger.debug() instead of writing to file
     if VIEW_MODE == "TRUE":
         logger.info(f"Running in view mode. Skipping sync of route {uuid} for project {db_project_id}.")            
@@ -149,7 +186,17 @@ async def sync_single_route_to_bigquery(db_project_id, project_number, uuid, rou
                     logger.error(f"Error deleting old route {uuid}: {e}")
 
             # --- Create route ---
-            result = await create_route(project_number, uuid, payload)
+            try:
+                result = await create_route(project_number, uuid, payload)
+            except RouteCreationError as e:
+                logger.error(f"Route creation failed for {uuid}: {e.message}")
+                await update_route_failed(db_project_id, uuid, e.message, e.status_code)
+                return {
+                    "status": "error",
+                    "message": f"Route creation failed: {e.message}",
+                    "details": {"uuid": uuid, "error_code": e.status_code},
+                }
+
             logger.debug(f"API result for uuid {uuid}: {result}")
 
             if not result or not isinstance(result, dict):
@@ -159,7 +206,7 @@ async def sync_single_route_to_bigquery(db_project_id, project_number, uuid, rou
                 route_status = result.get("state")
                 await update_synced_route(db_project_id, uuid, route_status)
             except Exception as e:
-                logger.error(f"Error updating synced route for uuid {uuid}: {e}")    
+                logger.error(f"Error updating synced route for uuid {uuid}: {e}")
             return {
                 "status": "success",
                 "message": f"Successfully created route {uuid} for project {db_project_id}."

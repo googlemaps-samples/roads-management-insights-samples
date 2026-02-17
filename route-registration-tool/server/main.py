@@ -71,6 +71,8 @@ async def lifespan(app: FastAPI):
     global global_validation_checker
     
     # Startup
+    # Ensure database schema exists (same DB path as request handlers; safe on every startup)
+    init_db()
     # Initialize Firebase Admin SDK for route metrics logging
     initialize_firebase()
     
@@ -106,9 +108,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize DB schema
-init_db()
 
 # Register all routes at once
 app.include_router(all_routes_router)

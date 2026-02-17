@@ -81,14 +81,6 @@ export default function NewProjectSidebar({
     if (!name || name.trim() === "") {
       return "Project name is required"
     }
-    if (existingProjects) {
-      const duplicate = existingProjects.find(
-        (p) => p.name.toLowerCase().trim() === name.toLowerCase().trim(),
-      )
-      if (duplicate) {
-        return `A project with the name "${name}" already exists. Please choose a different name.`
-      }
-    }
     return true
   }
 
@@ -96,16 +88,7 @@ export default function NewProjectSidebar({
     if (!projectId || projectId.trim() === "") {
       return "Google Cloud Project ID is required"
     }
-    if (existingProjects) {
-      const duplicate = existingProjects.find(
-        (p) =>
-          p.bigQueryColumn?.googleCloudProjectId?.toLowerCase().trim() ===
-          projectId.toLowerCase().trim(),
-      )
-      if (duplicate) {
-        return `A project with Google Cloud Project ID "${projectId}" already exists (Project: "${duplicate.name}"). Each GCP project can only be used once.`
-      }
-    }
+
     return true
   }
 
