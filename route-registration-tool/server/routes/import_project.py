@@ -52,6 +52,10 @@ async def import_project_from_zip(zip_bytes: bytes):
 
     json_project = data["project"]
     project_id = json_project.get("id")
+    # Preserve project_uuid from export so the same project identity is kept on import
+    project_uuid_val = json_project.get("project_uuid")
+    if not project_uuid_val:
+        project_uuid_val = str(uuid.uuid4())
     project_name = json_project.get("project_name")
     google_cloud_project_id = json_project.get("google_cloud_project_id")
     google_cloud_project_number = json_project.get("google_cloud_project_number")
@@ -96,7 +100,6 @@ async def import_project_from_zip(zip_bytes: bytes):
             f"Please check your authentication and project permissions."
         )
 
-    project_uuid_val = str(uuid.uuid4())
     try:
         with engine.begin() as conn:
             existing_project = conn.execute(
