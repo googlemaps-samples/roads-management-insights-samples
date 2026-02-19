@@ -23,6 +23,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from server.db.database import query_db
 from server.utils.viewstate_calculator import calculate_viewstate
+from server.utils.feature_flags import ENABLE_MULTITENANT
 
 # Setup logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -266,6 +267,19 @@ async def create_project(project_data: ProjectCreate):
         google_cloud_project_number = project_data.google_cloud_project_number
         subscription_id = project_data.subscription_id
         dataset_name = project_data.dataset_name
+
+        # Single-tenant: one GCP project per app project
+        if not ENABLE_MULTITENANT and google_cloud_project_id:
+            existing_gcp_query = """
+            SELECT id, project_name FROM projects
+            WHERE google_cloud_project_id = ? AND deleted_at IS NULL
+            """
+            existing_gcp = await query_db(existing_gcp_query, (google_cloud_project_id,), one=True)
+            if existing_gcp:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A project with Google Cloud Project ID '{google_cloud_project_id}' already exists (Project: '{existing_gcp['project_name']}'). Each GCP project can only be used once."
+                )
         
         # Calculate viewstate from GeoJSON boundary
         try:
@@ -332,6 +346,23 @@ async def update_project(project_id: int, project_data: ProjectUpdate):
                 raise HTTPException(
                     status_code=400,
                     detail=f"A project with the name '{project_data.project_name}' already exists. Please choose a different name."
+                )
+
+        # Single-tenant: one GCP project per app project
+        if not ENABLE_MULTITENANT and project_data.google_cloud_project_id is not None:
+            existing_gcp_query = """
+            SELECT id, project_name FROM projects
+            WHERE google_cloud_project_id = ? AND id != ? AND deleted_at IS NULL
+            """
+            existing_gcp = await query_db(
+                existing_gcp_query,
+                (project_data.google_cloud_project_id, project_id),
+                one=True,
+            )
+            if existing_gcp:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A project with Google Cloud Project ID '{project_data.google_cloud_project_id}' already exists (Project: '{existing_gcp['project_name']}'). Each GCP project can only be used once."
                 )
         
         # Calculate viewstate if GeoJSON is being updated
@@ -470,6 +501,23 @@ async def format_and_create_projects(request: FormatAndCreateRequest):
             except Exception as e:
                 logger.warning(f"Failed to calculate viewstate for project: {str(e)}, continuing without viewstate")
                 viewstate_json = None
+
+            # Single-tenant: one GCP project per app project
+            if not ENABLE_MULTITENANT and project_data.google_cloud_project_id:
+                existing_gcp_query = """
+                SELECT id, project_name FROM projects
+                WHERE google_cloud_project_id = ? AND deleted_at IS NULL
+                """
+                existing_gcp = await query_db(
+                    existing_gcp_query,
+                    (project_data.google_cloud_project_id,),
+                    one=True,
+                )
+                if existing_gcp:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"A project with Google Cloud Project ID '{project_data.google_cloud_project_id}' already exists (Project: '{existing_gcp['project_name']}'). Each GCP project can only be used once."
+                    )
             
             project_uuid_val = str(uuid.uuid4())
             query = """

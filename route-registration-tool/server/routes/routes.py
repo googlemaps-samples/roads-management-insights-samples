@@ -1047,7 +1047,7 @@ async def save_route(route_data: RouteSaveRequest, background_tasks: BackgroundT
         else:
             # Create new route
             logger.info(f"Creating new route with UUID: {route_data.uuid}")
-
+            print(f"MAX_ROUTES_PER_PROJECT: {MAX_ROUTES_PER_PROJECT}")
             # Enforce max routes per project (1000)
             count_row = await query_db(
                 "SELECT COUNT(*) AS cnt FROM routes WHERE project_id = ? AND deleted_at IS NULL",

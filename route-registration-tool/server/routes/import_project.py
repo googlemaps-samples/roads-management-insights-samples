@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DatabaseError, IntegrityError, OperationalError
 from server.utils.create_engine import engine
 from server.utils.verify_project_details import verify_project_details
+from server.utils.feature_flags import ENABLE_MULTITENANT
 
 router = APIRouter()
 logger = logging.getLogger("project_import")
@@ -187,6 +188,19 @@ async def import_project_from_zip(zip_bytes: bytes):
         error_msg = str(e.orig) if e.orig else str(e)
         logger.error(f"Database integrity error during project import: {error_msg}")
         if "UNIQUE constraint failed" in error_msg:
+            if not ENABLE_MULTITENANT and google_cloud_project_id:
+                # Single-tenant: friendly message when GCP ID already in use
+                with engine.begin() as conn:
+                    row = conn.execute(
+                        text(
+                            "SELECT project_name FROM projects WHERE google_cloud_project_id = :value AND deleted_at IS NULL"
+                        ),
+                        {"value": google_cloud_project_id},
+                    ).fetchone()
+                if row:
+                    raise ValueError(
+                        f"You're trying to upload a project with a Google Cloud Project ID that's already in use by '{row[0]}'."
+                    )
             raise ValueError(
                 "A record with this value already exists. "
                 "Check that project name and other unique fields are not duplicated."
