@@ -102,6 +102,19 @@ async def import_project_from_zip(zip_bytes: bytes):
         )
 
     try:
+        # Pre-insert check: when single-tenant, reject if GCP project ID is already in use (no UNIQUE constraint in DB).
+        if not ENABLE_MULTITENANT and google_cloud_project_id:
+            with engine.connect() as _conn:
+                existing_row = _conn.execute(
+                    text(
+                        "SELECT project_name FROM projects WHERE google_cloud_project_id = :gcp AND deleted_at IS NULL"
+                    ),
+                    {"gcp": google_cloud_project_id},
+                ).fetchone()
+                if existing_row:
+                    raise ValueError(
+                        f"You're trying to upload a project with a Google Cloud Project ID that's already in use by '{existing_row[0]}'."
+                    )
         with engine.begin() as conn:
             existing_project = conn.execute(
                 text("SELECT 1 FROM projects WHERE id = :id"),
