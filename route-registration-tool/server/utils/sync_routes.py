@@ -44,6 +44,7 @@ from .google_roads_api import (
 )
 from .sync_single_route import sync_single_route_to_bigquery
 from .compute_parent_sync_status import batch_update_parent_sync_statuses
+from .feature_flags import ENABLE_MULTITENANT
 from .firebase_logger import log_route_creation
 from .route_operations_logger import (
     log_sync_start,
@@ -638,7 +639,7 @@ def prepare_payload_from_dict(route_dict):
         "route_type": route_dict.get("route_type", "Existing"),
         "created_by": "Roads Selection Tool"
     }
-    if route_dict.get("project_uuid"):
+    if ENABLE_MULTITENANT and route_dict.get("project_uuid"):
         route_attrs["project_uuid"] = route_dict["project_uuid"]
     request_obj = {
         "displayName": route_dict["route_name"],
@@ -1509,61 +1510,78 @@ async def execute_sync(
 
     stats = {}
 
-    # Fetch all routes from DB (by project_id) and all routes from API in parallel
+    # Fetch all routes from DB and API in parallel
     op_start = time.time()
     start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     try:
-        all_routes, routes_list, bq_updates = await asyncio.gather(
-            fetch_all_project_routes_by_project_id(db_project_id, tag),
-            list_routes(project_number, project_uuid=None),
-            perform_bq_sync(gcp_project_id, db_project_id, dataset_name),
-        )
-
-        def _api_route_uuid(r):
-            try:
-                return (r.get("name") or "").split("/")[-1]
-            except Exception:
-                return None
-
-        def _api_route_project_uuid(r):
-            return (r.get("routeAttributes") or {}).get("project_uuid")
-
-        # Map: API route uuid -> project_uuid stored on API for that route
-        api_uuid_to_project_uuid = {
-            _api_route_uuid(r): _api_route_project_uuid(r)
-            for r in routes_list
-            if _api_route_uuid(r)
-        }
-
-        # Routes in our DB that need re-creation: not on API, or on API with different project_uuid
-        to_recreate = [
-            r
-            for r in all_routes
-            if r.get("deleted_at") is None
-            and (
-                r["uuid"] not in api_uuid_to_project_uuid
-                or api_uuid_to_project_uuid.get(r["uuid"]) != project_uuid
+        if ENABLE_MULTITENANT:
+            # Multi-tenant: fetch by project_id (all routes for this app project), list API without filter
+            all_routes, routes_list, bq_updates = await asyncio.gather(
+                fetch_all_project_routes_by_project_id(db_project_id, tag),
+                list_routes(project_number, project_uuid=None),
+                perform_bq_sync(gcp_project_id, db_project_id, dataset_name),
             )
-        ]
-        for r in to_recreate:
-            r["project_uuid"] = project_uuid  # ensure payload uses current project_uuid
-        if to_recreate:
-            await update_routes_project_uuid_unsynced(
-                db_project_id, project_uuid, [r["uuid"] for r in to_recreate]
-            )
-            stats["routes_to_recreate"] = len(to_recreate)
 
-        # Rest of routes: segregate into deleted / validating / unsynced / synced_invalid
-        to_recreate_uuids = {r["uuid"] for r in to_recreate}
-        the_rest = [r for r in all_routes if r["uuid"] not in to_recreate_uuids]
-        deleted_uuids, local_deleted_uuids, validating_rows, unsynced_rows, synced_invalid_rows = (
-            segregate_routes(the_rest)
-        )
-        logger.info(
-            f"Segregated routes: deleted={len(deleted_uuids)}, local_deleted={len(local_deleted_uuids)}, "
-            f"validating={len(validating_rows)}, unsynced={len(unsynced_rows)}, synced_invalid={len(synced_invalid_rows)}, "
-            f"to_recreate={len(to_recreate)}"
-        )
+            def _api_route_uuid(r):
+                try:
+                    return (r.get("name") or "").split("/")[-1]
+                except Exception:
+                    return None
+
+            def _api_route_project_uuid(r):
+                return (r.get("routeAttributes") or {}).get("project_uuid")
+
+            api_uuid_to_project_uuid = {
+                _api_route_uuid(r): _api_route_project_uuid(r)
+                for r in routes_list
+                if _api_route_uuid(r)
+            }
+
+            # Routes that need re-creation: not on API, or on API with different project_uuid
+            to_recreate = [
+                r
+                for r in all_routes
+                if r.get("deleted_at") is None
+                and (
+                    r["uuid"] not in api_uuid_to_project_uuid
+                    or api_uuid_to_project_uuid.get(r["uuid"]) != project_uuid
+                )
+            ]
+            for r in to_recreate:
+                r["project_uuid"] = project_uuid
+            if to_recreate:
+                await update_routes_project_uuid_unsynced(
+                    db_project_id, project_uuid, [r["uuid"] for r in to_recreate]
+                )
+                stats["routes_to_recreate"] = len(to_recreate)
+
+            to_recreate_uuids = {r["uuid"] for r in to_recreate}
+            the_rest = [r for r in all_routes if r["uuid"] not in to_recreate_uuids]
+            deleted_uuids, local_deleted_uuids, validating_rows, unsynced_rows, synced_invalid_rows = (
+                segregate_routes(the_rest)
+            )
+            logger.info(
+                f"Segregated routes: deleted={len(deleted_uuids)}, local_deleted={len(local_deleted_uuids)}, "
+                f"validating={len(validating_rows)}, unsynced={len(unsynced_rows)}, synced_invalid={len(synced_invalid_rows)}, "
+                f"to_recreate={len(to_recreate)}"
+            )
+        else:
+            # Single-tenant: fetch by project_uuid from DB; list API without filter (all routes for GCP project)
+            all_routes, routes_list, bq_updates = await asyncio.gather(
+                fetch_all_project_routes(project_uuid, tag),
+                list_routes(project_number, project_uuid=None),
+                perform_bq_sync(gcp_project_id, db_project_id, dataset_name),
+            )
+            to_recreate = []
+            deleted_uuids, local_deleted_uuids, validating_rows, unsynced_rows, synced_invalid_rows = (
+                segregate_routes(all_routes)
+            )
+            logger.info(
+                f"Segregated routes: deleted={len(deleted_uuids)}, local_deleted={len(local_deleted_uuids)}, "
+                f"validating={len(validating_rows)}, unsynced={len(unsynced_rows)}, synced_invalid={len(synced_invalid_rows)}"
+            )
+            api_route_map = build_api_route_map(routes_list)
+            existing_route_ids_set = set(api_route_map.keys())
 
         # Process Local Deletions
         if local_deleted_uuids:
@@ -1603,23 +1621,25 @@ async def execute_sync(
                 "duration_seconds": op_end - op_start
             })
 
-        # Delete from API routes that exist with wrong project_uuid (so we can re-create with correct)
-        wrong_uuids = [r["uuid"] for r in to_recreate if r["uuid"] in api_uuid_to_project_uuid]
-        if wrong_uuids:
-            logger.info(
-                f"Deleting {len(wrong_uuids)} route(s) from API with wrong project_uuid for re-creation."
-            )
-            success_dels_wrong = await process_deletions(db_project_id, project_number, wrong_uuids)
-            if success_dels_wrong:
-                stats["routes_deleted_wrong_project_uuid"] = len(success_dels_wrong)
+        # Delete from API routes that exist with wrong project_uuid (multi-tenant only)
+        if ENABLE_MULTITENANT:
+            wrong_uuids = [r["uuid"] for r in to_recreate if r["uuid"] in api_uuid_to_project_uuid]
+            if wrong_uuids:
+                logger.info(
+                    f"Deleting {len(wrong_uuids)} route(s) from API with wrong project_uuid for re-creation."
+                )
+                success_dels_wrong = await process_deletions(db_project_id, project_number, wrong_uuids)
+                if success_dels_wrong:
+                    stats["routes_deleted_wrong_project_uuid"] = len(success_dels_wrong)
 
         # Log sync start with total routes to route operations log
         log_sync_start(db_project_id, project_number, len(all_routes) if all_routes else 0, tag)
 
-        # Build API route map only from routes with correct project_uuid (so to_recreate get pushed)
-        correct_routes = [r for r in routes_list if _api_route_project_uuid(r) == project_uuid]
-        api_route_map = build_api_route_map(correct_routes)
-        existing_route_ids_set = set(api_route_map.keys())
+        # Build API route map (multi-tenant: only routes with correct project_uuid; single-tenant: set above)
+        if ENABLE_MULTITENANT:
+            correct_routes = [r for r in routes_list if _api_route_project_uuid(r) == project_uuid]
+            api_route_map = build_api_route_map(correct_routes)
+            existing_route_ids_set = set(api_route_map.keys())
 
     except RouteListError as e:
         # list_routes API call failed - cannot proceed without API state
@@ -1669,7 +1689,7 @@ async def execute_sync(
 
     # Push Unsynced + Invalid + to_recreate (Creation) — skip only routes that already exist in API with RUNNING status
     # to_recreate = routes not on API or on API with wrong project_uuid (we already deleted those from API)
-    to_create_candidates = unsynced_rows + to_recreate
+    to_create_candidates = unsynced_rows + (to_recreate if ENABLE_MULTITENANT else [])
     if to_create_candidates:
         to_create = []
         already_running = []
@@ -1736,10 +1756,11 @@ async def execute_sync(
     if tag is None:
         op_start = time.time()
         start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        # Save only routes that belong to this project (matching project_uuid); filter out wrong or missing project_uuid
+        # Multi-tenant: save only routes with matching project_uuid; single-tenant: save all from API (routes_list)
+        routes_to_save = correct_routes if ENABLE_MULTITENANT else routes_list
         bq_update_map = await build_bq_update_map(bq_updates)
         save_res = await save_routes_to_db(
-            correct_routes, db_project_id, project_uuid, bq_update_map
+            routes_to_save, db_project_id, project_uuid, bq_update_map
         )
         logger.info(
             f"Successfully saved {save_res['inserted']} routes to database."

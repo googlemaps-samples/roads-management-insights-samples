@@ -16,17 +16,34 @@
 import logging
 from fastapi import APIRouter, HTTPException
 from server.utils.project_list import list_accessible_gcp_projects
+from server.utils.feature_flags import ENABLE_MULTITENANT
+from server.db.database import query_db
 
 router = APIRouter()
 logger = logging.getLogger("get_projects_route")
 
+
 @router.get("/gcp-projects-list")
 async def get_projects_list():
-    """Get all accessible GCP projects."""
+    """Get accessible GCP projects. When single-tenant, excludes GCP IDs already used by a project."""
     projects = list_accessible_gcp_projects()
     if type(projects) == str:
         logger.error(f"Error: {projects}")
         raise HTTPException(status_code=403, detail=projects)
 
-    logger.info(f"Found {len(projects)} projects")
+    if not ENABLE_MULTITENANT:
+        # Single-tenant: only show GCP projects not already used
+        existing_projects_query = """
+        SELECT google_cloud_project_id
+        FROM projects
+        WHERE google_cloud_project_id IS NOT NULL
+        AND deleted_at IS NULL
+        """
+        existing_rows = await query_db(existing_projects_query)
+        used_project_ids = {row["google_cloud_project_id"] for row in existing_rows}
+        projects = [p for p in projects if p.get("project_id") not in used_project_ids]
+        logger.info(f"Found {len(projects)} available projects (single-tenant: excluding already used)")
+    else:
+        logger.info(f"Found {len(projects)} projects")
+
     return {"projects": projects}
