@@ -11,3 +11,7 @@
 my_database.db
 /logs.txt
 /logs/**
+deploy.sh
+cloudbuild_multi*.yaml
+cloudbuild_single_dev.yaml
+firebase-debug.log

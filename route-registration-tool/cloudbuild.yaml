@@ -1,11 +1,12 @@
 steps:
-  # Build the container image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/route-registration-tool', '.']
-
-  # Push the container image to Container Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/route-registration-tool']
+  # Build and push the container image using Kaniko for caching
+  - name: 'gcr.io/kaniko-project/executor:latest'
+    args:
+      - --destination=gcr.io/$PROJECT_ID/route-registration-tool
+      - --context=dir:///workspace
+      - --dockerfile=Dockerfile
+      - --cache=true
+      - --cache-ttl=24h
 
   # Deploy container image to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -27,8 +28,7 @@ steps:
       - '1'
       - '--service-account'
       - 'route-registration-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-secrets'
+      - 'GOOGLE_API_KEY=ROUTE_REGISTRATION_MAPS_API_KEY:latest'
       - '--set-env-vars'
-      - 'GOOGLE_API_KEY=$_GOOGLE_API_KEY,POLYGON_ROADS_API_URL=https://roads.googleapis.com/v2/roads:list,API_URL=https://roads.googleapis.com/selection/v1/projects/,VIEW_MODE=FALSE,ENABLE_FIRESTORE_LOGGING=false'
-
-images:
-  - 'gcr.io/$PROJECT_ID/route-registration-tool'
+      - 'POLYGON_ROADS_API_URL=https://roads.googleapis.com/v2/roads:list,API_URL=https://roads.googleapis.com/selection/v1/projects/,VIEW_MODE=FALSE,ENABLE_FIRESTORE_LOGGING=false'
