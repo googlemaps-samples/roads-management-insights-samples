@@ -1,0 +1,38 @@
+steps:
+  # Build and push the container image using Kaniko for caching
+  - name: 'gcr.io/kaniko-project/executor:latest'
+    args:
+      - --destination=gcr.io/$PROJECT_ID/route-registration-tool
+      - --context=dir:///workspace
+      - --dockerfile=Dockerfile
+      - --cache=true
+      - --cache-ttl=24h
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'route-registration-admin'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/route-registration-tool'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--no-allow-unauthenticated'
+      - '--min'
+      - '1'
+      - '--max'
+      - '1'
+      - '--memory'
+      - '768Mi'
+      - '--execution-environment'
+      - 'gen2'
+      - '--service-account'
+      - 'route-registration-sa@$PROJECT_ID.iam.gserviceaccount.com'
+      - '--set-secrets'
+      - 'GOOGLE_API_KEY=ROUTE_REGISTRATION_MAPS_API_KEY:latest'
+      - '--set-env-vars'
+      - 'POLYGON_ROADS_API_URL=https://roads.googleapis.com/v2/roads:list,API_URL=https://roads.googleapis.com/selection/v1/projects/,VIEW_MODE=FALSE,ENABLE_FIRESTORE_LOGGING=false'
