@@ -11,6 +11,7 @@
 my_database.db
 /logs.txt
 /logs/**
+/ui/env
 deploy.sh
 cloudbuild_multi*.yaml
 cloudbuild_single*.yaml
