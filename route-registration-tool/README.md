@@ -72,6 +72,23 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
 
 ## Deployment
 
+### BigQuery Setup
+
+The route synchronization background process expects a BigQuery dataset to exist in the `US` location named `historical_roads_data` with specific tables and schema (including `GEOGRAPHY` types for spatial functions).
+
+We have provided a setup script to automate this.
+
+```bash
+# 1. Edit the setup script and set your PROJECT_ID inside it
+nano bq_setup.sh 
+
+# 2. Make the script executable
+chmod +x bq_setup.sh
+
+# 3. Run the script 
+./bq_setup.sh
+```
+
 ### Deploy to Google Cloud Run
 
 ```bash
@@ -82,3 +99,10 @@ gcloud run deploy route-registration-tool --project=your-google-cloud-project-id
 - Service account needs following permissions:
   - roles/bigquery.dataViewer
   - roles/bigquery.jobUser
+  - roles/serviceusage.serviceUsageConsumer
+  - A Custom IAM Role containing the following permissions:
+    - `roads.selectedRoutes.batchCreate`
+    - `roads.selectedRoutes.create`
+    - `roads.selectedRoutes.delete`
+    - `roads.selectedRoutes.get`
+    - `roads.selectedRoutes.list`
