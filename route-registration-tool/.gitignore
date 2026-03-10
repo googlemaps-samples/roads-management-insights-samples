@@ -13,3 +13,4 @@ ui/package-lock.json
 my_database.db
 /logs.txt
 /logs/**
+/ui/env
