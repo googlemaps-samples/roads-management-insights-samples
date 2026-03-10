@@ -79,13 +79,10 @@ The route synchronization background process expects a BigQuery dataset to exist
 We have provided a setup script to automate this.
 
 ```bash
-# 1. Edit the setup script and set your PROJECT_ID inside it
-nano bq_setup.sh 
-
-# 2. Make the script executable
+# 1. Make the script executable
 chmod +x bq_setup.sh
 
-# 3. Run the script 
+# 2. Run the script (it will prompt you for your configuration)
 ./bq_setup.sh
 ```
 

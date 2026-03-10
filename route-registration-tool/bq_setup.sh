@@ -5,23 +5,26 @@
 set -e
 
 # --- Configuration Variables ---
-# Replace this with your actual Google Cloud Project ID
-PROJECT_ID="your-google-cloud-project-id"
-DATASET_NAME="historical_roads_data"
-LOCATION="US"
-
 echo "========================================="
 echo "BigQuery Setup for Roads Sync Tool"
-echo "Project ID: $PROJECT_ID"
-echo "Dataset:    $DATASET_NAME"
-echo "Location:   $LOCATION"
 echo "========================================="
 echo ""
 
-if [ "$PROJECT_ID" == "your-google-cloud-project-id" ]; then
-  echo "ERROR: Please edit this script and set the PROJECT_ID variable to your actual project ID."
-  exit 1
+read -p "Enter your Google Cloud Project ID: " PROJECT_ID
+if [ -z "$PROJECT_ID" ]; then
+    echo "ERROR: Project ID cannot be empty."
+    exit 1
 fi
+
+read -p "Enter the Dataset Name [default: historical_roads_data]: " DATASET_NAME
+DATASET_NAME=${DATASET_NAME:-historical_roads_data}
+
+read -p "Enter the BigQuery Location (e.g., US, EU) [default: US]: " LOCATION
+LOCATION=${LOCATION:-US}
+
+echo ""
+echo "Creating dataset $DATASET_NAME in project $PROJECT_ID at location $LOCATION..."
+echo ""
 
 echo "[1/4] Checking authentication..."
 # Ensure the user is authenticated with gcloud
