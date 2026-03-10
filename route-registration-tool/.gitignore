@@ -1,8 +1,6 @@
 **/__pycache__
 .env
 .venv
-ui/package-lock.json
-/ui/package-lock.json
 **/deprecated*
 /ui/src/stores/deprecated-map-layers-store.ts
 /ui/src/stores/deprecated-drawing-store.ts
@@ -14,3 +12,7 @@ my_database.db
 /logs.txt
 /logs/**
 /ui/env
+deploy.sh
+cloudbuild_multi*.yaml
+cloudbuild_single*.yaml
+firebase-debug.log

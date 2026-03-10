@@ -1,54 +1,57 @@
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-
 # Stage 1: Build the React frontend
 FROM node:20-slim AS build-ui
 WORKDIR /app/ui
-COPY ui/ ./
-RUN npm install
-RUN npm run build
 
+# Copy only package files first to leverage layer caching
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+
+# Copy the rest of the frontend files and build
+COPY ui/ ./
+RUN npm run build
 
 # Stage 2: Build the Python backend
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install poetry
-RUN pip install poetry
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    POETRY_VERSION=2.0.1 \
+    POETRY_HOME="/opt/poetry" \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_NO_INTERACTION=1
 
-# Copy poetry files
-COPY pyproject.toml poetry.lock ./
+# Add poetry to PATH
+ENV PATH="$POETRY_HOME/bin:$PATH"
 
-# Install GDAL and system build dependencies
-RUN apt-get update && apt-get install -y \
+# Install system build dependencies and GDAL
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     gdal-bin \
     libgdal-dev \
     build-essential \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-RUN poetry lock
+# Install poetry
+RUN curl -sSL https://install.python-poetry.org | python3 -
+
+# Copy poetry files separately for better caching
+COPY pyproject.toml poetry.lock ./
+
+# Install backend dependencies
 RUN poetry install --no-root --only main
 
-# Copy the rest of the application
-COPY . .
+# Copy only the necessary backend files
+COPY server/ ./server/
+# COPY README.md ./ # If needed by poetry, but we used --no-root
 
-# Copy the built frontend
+# Copy the built frontend from Stage 1
 COPY --from=build-ui /app/ui/dist ./ui/dist
 
-# Expose the port and run the application
+# Expose the port
 EXPOSE 8080
-CMD poetry run uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8080}
+
+# Run the application
+CMD uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8080}

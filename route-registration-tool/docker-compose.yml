@@ -2,6 +2,7 @@ services:
   roads-selection-tool:
     build: .
     image: route-registration-tool:latest
+    env_file: .env
     volumes:
       - ~/.config/gcloud:/root/.config/gcloud:ro
     ports:

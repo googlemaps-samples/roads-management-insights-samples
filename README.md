@@ -4,4 +4,4 @@ This repository contains samples for Google Maps Platform Roads Management Insig
 
 ## Contents
 
-- [rmi-demo-app](./rmi-demo-app): A comprehensive demo application showcasing real-time and historical traffic data insights.
+- [sample-app](./sample-app): A comprehensive demo application showcasing real-time and historical traffic data insights.

@@ -58,13 +58,40 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
     - Copy `.env.example` into a file called `.env`.
     - Open the `.env` file and set Google API key there.
 
-5. **Build and Deploy Docker Container**
+5.  **Run the application locally**
+
+    From the `route-registration-tool` directory:
+
+    1. Install UI dependencies and build the frontend:
+
+       ```bash
+       cd ui
+       npm i
+       npm run build
+       cd ..
+       ```
+
+    2. Set environment variables (if not done already):
+       - Copy `.env.example` to `.env` in the `route-registration-tool` folder.
+       - Edit `.env` and set your Google API key and any other required variables.
+
+    3. Start the server from the `route-registration-tool` folder:
+
+       ```bash
+       poetry run uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
+       ```
+
+    The application will be available at `http://localhost:8000`.
+
+6. **Build and Deploy Docker Container (Local Deployment Only)**
+
+  *Note: This step is only necessary if you want to deploy the container locally.*
 
   - Build the Docker image:
     ```bash
     docker compose build -t <image_name> .
     ```
-    - Open docker-compose.yml file and ensure the image name in correct
+    - Open `docker-compose.yml` file and ensure the image name is correct.
   - Deploy the container:
     ```bash
     docker compose up -d
@@ -89,17 +116,33 @@ chmod +x bq_setup.sh
 ### Deploy to Google Cloud Run
 
 ```bash
-gcloud run deploy route-registration-tool --project=your-google-cloud-project-id --region=us-central1 --source . --allow-unauthenticated --platform managed --service-account=your-service-account-gmail --max-instances=1 --min-instances=1
+gcloud run deploy route-registration-tool \
+  --project=your-google-cloud-project-id \
+  --region=us-central1 \
+  --source . \
+  --allow-unauthenticated \
+  --platform managed \
+  --service-account=your-service-account-email \
+  --max-instances=1 \
+  --min-instances=0
 ```
 
-- Replace `your-google-cloud-project-id` and `your-service-account-gmail` as needed.
-- Service account needs following permissions:
-  - roles/bigquery.dataViewer
-  - roles/bigquery.jobUser
-  - roles/serviceusage.serviceUsageConsumer
+### Required Permissions
+
+Replace `your-google-cloud-project-id` and `your-service-account-gmail` as needed. The Service Account used for deployment needs the following roles:
+- `roles/bigquery.jobUser` (Project level)
+- `roles/bigquery.dataViewer` (Restricted to the RMI BigQuery dataset resource only)
+- `roles/datastore.user` (if Firestore logging is enabled)
+- `roles/logging.logWriter`
+- `roles/roads.roadsSelectionAdmin` (Project level)
+- `roles/serviceusage.serviceUsageConsumer` (Project level)
+- `roles/secretmanager.secretAccessor` (Restricted to the `ROUTE_REGISTRATION_MAPS_API_KEY` secret resource only)
   - A Custom IAM Role containing the following permissions:
     - `roads.selectedRoutes.batchCreate`
     - `roads.selectedRoutes.create`
     - `roads.selectedRoutes.delete`
     - `roads.selectedRoutes.get`
     - `roads.selectedRoutes.list`
+
+
+

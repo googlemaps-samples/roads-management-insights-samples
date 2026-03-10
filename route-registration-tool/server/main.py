@@ -28,6 +28,8 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="pyproj")
 from dotenv import load_dotenv
 
+# Load .env before any app code that reads env vars (e.g. MAX_ROUTES_PER_PROJECT, ENABLE_MULTITENANT)
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 from server.utils.connection_manager import ConnectionManager
 from server.core.db_setup import init_db
@@ -36,7 +38,6 @@ from server.utils.firebase_logger import initialize_firebase
 from server.utils.check_routes_status import RouteStatusChecker
 
 ws_manager = ConnectionManager()
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 # Suppress thread errors during shutdown
 def handle_thread_exception(args):
@@ -71,6 +72,8 @@ async def lifespan(app: FastAPI):
     global global_validation_checker
     
     # Startup
+    # Ensure database schema exists (same DB path as request handlers; safe on every startup)
+    init_db()
     # Initialize Firebase Admin SDK for route metrics logging
     initialize_firebase()
     
@@ -106,9 +109,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize DB schema
-init_db()
 
 # Register all routes at once
 app.include_router(all_routes_router)

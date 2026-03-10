@@ -331,7 +331,7 @@ const DrawingCompletionMenuRenderer: React.FC = () => {
         // Create overlay only if it doesn't exist
         if (!overlayRef.current) {
           const overlay = new google.maps.OverlayView()
-          overlay.onAdd = function () {}
+          overlay.onAdd = function () { }
           overlay.draw = function () {
             const proj = this.getProjection()
             if (
@@ -386,13 +386,13 @@ const DrawingCompletionMenuRenderer: React.FC = () => {
               // Choose appropriate point: right side -> leftmost, left side -> rightmost
               const targetPoint = isOnRightSide
                 ? screenPoints.reduce(
-                    (min, p) => (p.x < min.x ? p : min),
-                    screenPoints[0],
-                  )
+                  (min, p) => (p.x < min.x ? p : min),
+                  screenPoints[0],
+                )
                 : screenPoints.reduce(
-                    (max, p) => (p.x > max.x ? p : max),
-                    screenPoints[0],
-                  )
+                  (max, p) => (p.x > max.x ? p : max),
+                  screenPoints[0],
+                )
 
               // Convert back to screen position with map container offset
               setScreenPosition({
@@ -682,12 +682,12 @@ const UnifiedProjectMap: React.FC<UnifiedProjectMapProps> = ({
           // Add the new stretched road feature to importedRoads
           const updatedImportedRoads = currentImportedRoads
             ? {
-                ...currentImportedRoads,
-                features: [
-                  ...currentImportedRoads.features,
-                  stretchedRoadFeature,
-                ],
-              }
+              ...currentImportedRoads,
+              features: [
+                ...currentImportedRoads.features,
+                stretchedRoadFeature,
+              ],
+            }
             : null
 
           return {

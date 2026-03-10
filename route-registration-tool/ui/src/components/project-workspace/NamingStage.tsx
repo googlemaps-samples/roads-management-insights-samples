@@ -95,9 +95,8 @@ const NamingStage: React.FC<NamingStageProps> = ({
       })
 
       if (segmentsOverLimit.length > 0) {
-        return `${segmentsOverLimit.length} segment${
-          segmentsOverLimit.length > 1 ? "s" : ""
-        } exceed 80km limit`
+        return `${segmentsOverLimit.length} segment${segmentsOverLimit.length > 1 ? "s" : ""
+          } exceed 80km limit`
       }
     }
     return null
@@ -109,6 +108,7 @@ const NamingStage: React.FC<NamingStageProps> = ({
     !routeNameError &&
     !tagError &&
     !isSaving
+
   return (
     <RightPanel
       className={className}

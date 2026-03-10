@@ -16,12 +16,14 @@
 # server/routes/projects.py
 import logging
 import json
+import uuid
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from server.db.database import query_db
 from server.utils.viewstate_calculator import calculate_viewstate
+from server.utils.feature_flags import ENABLE_MULTITENANT
 
 # Setup logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -55,6 +57,7 @@ class ProjectUpdate(BaseModel):
 class ProjectOut(BaseModel):
     """Model for project responses"""
     id: int
+    project_uuid: Optional[str] = None
     project_name: str
     jurisdiction_boundary_geojson: str
     google_cloud_project_id: Optional[str] = None
@@ -121,6 +124,7 @@ def row_to_project_out(row) -> ProjectOut:
     
     return ProjectOut(
         id=row["id"],
+        project_uuid=row["project_uuid"] if "project_uuid" in row.keys() else None,
         project_name=row["project_name"],
         jurisdiction_boundary_geojson=row["jurisdiction_boundary_geojson"],
         google_cloud_project_id=row["google_cloud_project_id"],
@@ -145,7 +149,7 @@ async def get_all_projects():
         logger.info("Fetching all projects")
         
         projects_query = """
-        SELECT id, project_name, jurisdiction_boundary_geojson,
+        SELECT id, project_uuid, project_name, jurisdiction_boundary_geojson,
                google_cloud_project_id, google_cloud_project_number, subscription_id,
                dataset_name, viewstate, map_snapshot, created_at, updated_at, deleted_at
         FROM projects 
@@ -214,7 +218,7 @@ async def get_project_by_id(project_id: int):
         logger.info(f"Fetching project with ID: {project_id}")
         
         query = """
-        SELECT id, project_name, jurisdiction_boundary_geojson,
+        SELECT id, project_uuid, project_name, jurisdiction_boundary_geojson,
                google_cloud_project_id, google_cloud_project_number, subscription_id,
                dataset_name, viewstate, map_snapshot, created_at, updated_at, deleted_at
         FROM projects 
@@ -258,14 +262,16 @@ async def create_project(project_data: ProjectCreate):
                 detail=f"A project with the name '{project_data.project_name}' already exists. Please choose a different name."
             )
         
-        # Check for duplicate google_cloud_project_id
+        # Prepare GCP/subscription/dataset fields for insert
         google_cloud_project_id = project_data.google_cloud_project_id
         google_cloud_project_number = project_data.google_cloud_project_number
         subscription_id = project_data.subscription_id
         dataset_name = project_data.dataset_name
-        if google_cloud_project_id:
+
+        # Single-tenant: one GCP project per app project
+        if not ENABLE_MULTITENANT and google_cloud_project_id:
             existing_gcp_query = """
-            SELECT id, project_name FROM projects 
+            SELECT id, project_name FROM projects
             WHERE google_cloud_project_id = ? AND deleted_at IS NULL
             """
             existing_gcp = await query_db(existing_gcp_query, (google_cloud_project_id,), one=True)
@@ -283,14 +289,16 @@ async def create_project(project_data: ProjectCreate):
             logger.warning(f"Failed to calculate viewstate: {str(e)}, continuing without viewstate")
             viewstate_json = None
         
+        project_uuid_val = str(uuid.uuid4())
         query = """
-        INSERT INTO projects (project_name, jurisdiction_boundary_geojson, viewstate, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (project_uuid, project_name, jurisdiction_boundary_geojson, viewstate, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         
         project_id = await query_db(
             query,
             (
+                project_uuid_val,
                 project_data.project_name,
                 project_data.jurisdiction_boundary_geojson,
                 viewstate_json,
@@ -339,14 +347,18 @@ async def update_project(project_id: int, project_data: ProjectUpdate):
                     status_code=400,
                     detail=f"A project with the name '{project_data.project_name}' already exists. Please choose a different name."
                 )
-        
-        # Check for duplicate google_cloud_project_id (if being updated)
-        if project_data.google_cloud_project_id is not None:
+
+        # Single-tenant: one GCP project per app project
+        if not ENABLE_MULTITENANT and project_data.google_cloud_project_id is not None:
             existing_gcp_query = """
-            SELECT id, project_name FROM projects 
+            SELECT id, project_name FROM projects
             WHERE google_cloud_project_id = ? AND id != ? AND deleted_at IS NULL
             """
-            existing_gcp = await query_db(existing_gcp_query, (project_data.google_cloud_project_id, project_id), one=True)
+            existing_gcp = await query_db(
+                existing_gcp_query,
+                (project_data.google_cloud_project_id, project_id),
+                one=True,
+            )
             if existing_gcp:
                 raise HTTPException(
                     status_code=400,
@@ -489,15 +501,34 @@ async def format_and_create_projects(request: FormatAndCreateRequest):
             except Exception as e:
                 logger.warning(f"Failed to calculate viewstate for project: {str(e)}, continuing without viewstate")
                 viewstate_json = None
+
+            # Single-tenant: one GCP project per app project
+            if not ENABLE_MULTITENANT and project_data.google_cloud_project_id:
+                existing_gcp_query = """
+                SELECT id, project_name FROM projects
+                WHERE google_cloud_project_id = ? AND deleted_at IS NULL
+                """
+                existing_gcp = await query_db(
+                    existing_gcp_query,
+                    (project_data.google_cloud_project_id,),
+                    one=True,
+                )
+                if existing_gcp:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"A project with Google Cloud Project ID '{project_data.google_cloud_project_id}' already exists (Project: '{existing_gcp['project_name']}'). Each GCP project can only be used once."
+                    )
             
+            project_uuid_val = str(uuid.uuid4())
             query = """
-            INSERT INTO projects (project_name, jurisdiction_boundary_geojson, viewstate, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO projects (project_uuid, project_name, jurisdiction_boundary_geojson, viewstate, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
             
             project_id = await query_db(
                 query,
                 (
+                    project_uuid_val,
                     project_name,
                     geojson,
                     viewstate_json,
