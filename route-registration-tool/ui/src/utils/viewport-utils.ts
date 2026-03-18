@@ -22,7 +22,6 @@ import {
  */
 export const restoreViewport = (projectData: Project | null) => {
   if (!projectData?.viewstate) {
-    console.log("🏠 No viewstate available to restore")
     return
   }
 
