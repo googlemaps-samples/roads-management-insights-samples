@@ -33,6 +33,12 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 from server.utils.connection_manager import ConnectionManager
 from server.core.db_setup import init_db
+from server.db.database import DB
+from server.utils.db_gcs import (
+    restore_db_from_gcs,
+    start_backup_thread,
+    stop_backup_thread,
+)
 from server.routes.all_routes import router as all_routes_router
 from server.utils.firebase_logger import initialize_firebase
 from server.utils.check_routes_status import RouteStatusChecker
@@ -70,13 +76,17 @@ global_validation_checker = None
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup and shutdown"""
     global global_validation_checker
-    
-    # Startup
+
+    # Startup: restore DB from GCS if local file does not exist (before creating empty DB)
+    restore_db_from_gcs(DB)
     # Ensure database schema exists (same DB path as request handlers; safe on every startup)
     init_db()
     # Initialize Firebase Admin SDK for route metrics logging
     initialize_firebase()
-    
+
+    # Start GCS DB backup thread (env-driven interval)
+    start_backup_thread(DB)
+
     # Start global validation checker (checks all projects, runs every 20 seconds)
     logging.info("Starting global validation checker (runs every 20 seconds for all projects)")
     global_validation_checker = RouteStatusChecker(project_number=None)
@@ -84,7 +94,8 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown - stop validation checker
+    # Shutdown - stop backup thread and validation checker
+    stop_backup_thread()
     if global_validation_checker:
         logging.info("Stopping global validation checker")
         global_validation_checker.stop_validation_checker()

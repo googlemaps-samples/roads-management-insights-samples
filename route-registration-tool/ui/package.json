@@ -24,7 +24,7 @@
     "@googlemaps/polyline-codec": "^1.0.28",
     "@hookform/resolvers": "^5.2.2",
     "@mui/icons-material": "^7.3.8",
-    "@mui/material": "6.1.6",
+    "@mui/material": "^7.3.8",
     "@mui/x-date-pickers": "^8.27.0",
     "@mui/x-date-pickers-pro": "^8.27.0",
     "@tailwindcss/vite": "^4.2.0",
@@ -64,7 +64,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@types/turf": "^3.5.32",
-    "@vitejs/plugin-react": "latest",
+    "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.24",
     "eslint": "^9.39.2",
     "eslint-plugin-react-hooks": "^7.0.1",
@@ -77,6 +77,6 @@
     "terser": "^5.46.0",
     "typescript": "latest",
     "typescript-eslint": "^8.56.0",
-    "vite": "latest"
+    "vite": "^7"
   }
 }
