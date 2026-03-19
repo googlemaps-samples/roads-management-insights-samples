@@ -14,6 +14,7 @@
 
 import { useMap } from "@vis.gl/react-google-maps"
 import { useEffect, useRef } from "react"
+import * as turf from "@turf/turf"
 
 import { StaticMap } from "./StaticMap"
 
@@ -60,39 +61,44 @@ function MapWithGeoJson({ boundaryGeoJson }: { boundaryGeoJson?: any }) {
 
       console.log("Added GeoJSON to map, fitting bounds...")
 
-      // Fit bounds to the GeoJSON
-      const bounds = new google.maps.LatLngBounds()
+      // Use Turf.js to calculate bounds reliably for any GeoJSON geometry type
+      try {
+        const bbox = turf.bbox(boundaryGeoJson) as [number, number, number, number]
+        // bbox format: [minLng, minLat, maxLng, maxLat]
 
-      // Calculate bounds from GeoJSON coordinates
-      const calculateBounds = (geometry: any) => {
-        if (geometry.type === "Polygon") {
-          geometry.coordinates[0].forEach((coord: number[]) => {
-            bounds.extend(new google.maps.LatLng(coord[1], coord[0]))
-          })
-        } else if (geometry.type === "MultiPolygon") {
-          geometry.coordinates.forEach((polygon: number[][][]) => {
-            polygon[0].forEach((coord: number[]) => {
+        const bounds = new google.maps.LatLngBounds(
+          new google.maps.LatLng(bbox[1], bbox[0]), // SW corner (minLat, minLng)
+          new google.maps.LatLng(bbox[3], bbox[2])  // NE corner (maxLat, maxLng)
+        )
+
+        // Fit bounds with padding
+        map.fitBounds(bounds)
+      } catch (bboxError) {
+        console.error("Failed to calculate bounds with Turf.js:", bboxError)
+        // Fallback to manual calculation if Turf.js fails
+        const bounds = new google.maps.LatLngBounds()
+
+        const addCoordsToBounds = (coords: number[][]) => {
+          coords.forEach((coord: number[]) => {
+            if (coord.length >= 2) {
               bounds.extend(new google.maps.LatLng(coord[1], coord[0]))
-            })
+            }
           })
         }
-      }
 
-      if (boundaryGeoJson.type === "FeatureCollection") {
-        boundaryGeoJson.features.forEach((feature: any) => {
-          calculateBounds(feature.geometry)
-        })
-      } else if (boundaryGeoJson.type === "Feature") {
-        calculateBounds(boundaryGeoJson.geometry)
-      }
+        // Simple fallback for basic geometries
+        if (boundaryGeoJson.type === "FeatureCollection") {
+          boundaryGeoJson.features?.forEach((feature: any) => {
+            if (feature.geometry?.type === "Polygon") {
+              addCoordsToBounds(feature.geometry.coordinates[0] || [])
+            }
+          })
+        } else if (boundaryGeoJson.type === "Feature" && boundaryGeoJson.geometry?.type === "Polygon") {
+          addCoordsToBounds(boundaryGeoJson.geometry.coordinates[0] || [])
+        }
 
-      // Fit bounds with padding
-      map.fitBounds(bounds, {
-        top: 50,
-        right: 50,
-        bottom: 50,
-        left: 50,
-      })
+        map.fitBounds(bounds)
+      }
 
       console.log("Bounds fitted successfully")
     } catch (error) {

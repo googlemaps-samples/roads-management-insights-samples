@@ -2,5 +2,13 @@
 .cursor
 .playwright-mcp
 ui/node_modules
-ui/package-lock.json
 .env
+.git
+.gitignore
+*.pyc
+__pycache__
+dist
+build
+.dockerignore
+Dockerfile
+node_modules

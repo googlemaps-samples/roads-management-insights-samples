@@ -230,11 +230,9 @@ async def prepare_payload_single(rows, project_uuid):
             "route_type": route_type,
             "created_by": "Roads Selection Tool"
         }
-        if project_uuid:
+        if project_uuid is not None:
             route_attrs["project_uuid"] = project_uuid
-        else:
-            raise ValueError("project_uuid is required")
-            
+
         request_obj = {
             "displayName": route_name,
             "dynamicRoute": dynamic_route,

@@ -102,13 +102,23 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
 ### Option 1: Secured Deployment (Recommended)
 
 #### Automated via Cloud Build
-This project includes a `cloudbuild.yaml` file to automate deployment with security best practices:
-```bash
-gcloud builds submit --config cloudbuild.yaml --substitutions=_GOOGLE_API_KEY=YOUR_API_KEY .
-```
-*(Replace `YOUR_API_KEY` with your actual Google Maps API Key)*
+This project includes a `cloudbuild.yaml` file to automate deployment with security best practices. It uses **Google Cloud Secret Manager** to securely manage the Maps API Key.
+
+1.  **Store your API Key in Secret Manager:**
+    ```bash
+    echo -n "YOUR_API_KEY" | gcloud secrets create ROUTE_REGISTRATION_MAPS_API_KEY --data-file=-
+    ```
+
+2.  **Grant access to the Service Account:**
+    The service account used by Cloud Run (`route-registration-sa@$PROJECT_ID.iam.gserviceaccount.com`) needs the `Secret Manager Secret Accessor` role for this secret.
+
+3.  **Submit the Build:**
+    ```bash
+    gcloud builds submit --config cloudbuild.yaml .
+    ```
 
 #### Manual via CLI
+To manually deploy using secrets:
 ```bash
 gcloud run deploy route-registration-tool \
   --project=your-google-cloud-project-id \
@@ -118,7 +128,8 @@ gcloud run deploy route-registration-tool \
   --platform managed \
   --service-account=your-service-account-email \
   --max-instances=1 \
-  --min-instances=0
+  --min-instances=0 \
+  --set-secrets=GOOGLE_API_KEY=ROUTE_REGISTRATION_MAPS_API_KEY:latest
 ```
 
 #### Accessing the Secured Service
@@ -146,7 +157,10 @@ gcloud run deploy route-registration-tool \
 
 ### Required Permissions
 The Service Account used for deployment needs the following roles:
-- `roles/bigquery.dataViewer`
-- `roles/bigquery.jobUser`
+- `roles/bigquery.jobUser` (Project level)
+- `roles/bigquery.dataViewer` (Restricted to the RMI BigQuery dataset resource only)
 - `roles/datastore.user` (if Firestore logging is enabled)
 - `roles/logging.logWriter`
+- `roles/roads.roadsSelectionAdmin` (Project level)
+- `roles/serviceusage.serviceUsageConsumer` (Project level)
+- `roles/secretmanager.secretAccessor` (Restricted to the `ROUTE_REGISTRATION_MAPS_API_KEY` secret resource only)

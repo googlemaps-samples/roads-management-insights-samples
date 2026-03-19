@@ -22,6 +22,7 @@ from .create_engine import async_engine
 from sqlalchemy import text
 from .google_roads_api import get_route, delete_route, create_route, prepare_payload_single, RouteCreationError
 from .compute_parent_sync_status import update_parent_sync_status, get_parent_route_uuid
+from .feature_flags import ENABLE_MULTITENANT
 
 # -------------------------
 # LOGGER SETUP
@@ -136,19 +137,22 @@ async def update_route_failed(db_project_id, uuid, error_message, error_code=400
 # MAIN FLOW
 # -------------------------
 async def sync_single_route_to_bigquery(db_project_id, project_number, uuid, route):
-    project_uuid = await get_project_uuid(db_project_id)
+    project_uuid = await get_project_uuid(db_project_id) if ENABLE_MULTITENANT else None
     payload = await prepare_payload_single(route, project_uuid=project_uuid)
     # Debug logging removed - use logger.debug() instead of writing to file
     if VIEW_MODE == "TRUE":
-        logger.info(f"Running in view mode. Skipping sync of route {uuid} for project {db_project_id}.")            
+        logger.info(f"Running in view mode. Skipping sync of route {uuid} for project {db_project_id}.")
         return {
             "status": "success",
             "message": "Skipping sync: Running in view mode."
         }
     else:
         # --- Delete old routes if they exist ---
+        # Single-tenant: don't filter by project_uuid when getting the route
         logger.info(f"Checking existing route {uuid} for project {db_project_id}.")
-        existing_route_id = await get_route(project_number, uuid)
+        existing_route_id = await get_route(
+            project_number, uuid, project_uuid=project_uuid
+        )
         if existing_route_id:
             logger.info(f"Existing route {uuid} found in project {db_project_id}.")
         else:

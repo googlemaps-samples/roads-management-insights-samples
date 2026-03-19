@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+import * as turf from "@turf/turf"
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 import { SyncStatus } from "../types"
+import { calculateZoomWebMercator } from "../utils/web-mercator"
 import { useLayerStore } from "./layer-store"
 
 // Types for the project workspace
@@ -212,7 +213,7 @@ interface ProjectWorkspaceStore {
   pendingRouteSelection: string | "close" | null // Route ID to select, "close" to close panel/collapse, or null for no pending action
 
   // === VIEWPORT PERSISTENCE ===
-  viewport: Viewport | null
+  // Note: Viewport is now stored directly in projectData.viewstate
 
   // === ACTIONS ===
 
@@ -277,8 +278,10 @@ interface ProjectWorkspaceStore {
   setRightPanelType: (type: RightPanelType) => void
 
   // Viewport Management
-  saveViewport: (viewport: Viewport) => void
-  restoreViewport: () => void
+  recalculateProjectViewstateFromBoundary: (mapDimensions?: {
+    width: number
+    height: number
+  }) => void
 
   // Reset
   reset: () => void
@@ -314,7 +317,6 @@ export const useProjectWorkspaceStore = create<ProjectWorkspaceStore>()(
       pendingFile: null,
       pendingFeatureCount: 0,
       pendingProperties: [],
-      viewport: null,
       showSelectedRouteSegments: false,
       showIndividualMarkers: true,
       dynamicIslandHeight: 0,
@@ -331,6 +333,9 @@ export const useProjectWorkspaceStore = create<ProjectWorkspaceStore>()(
           selectedRoute: null,
           mapMode: "view",
         })
+
+        // Auto-calculate project viewstate from boundary if available
+        get().recalculateProjectViewstateFromBoundary()
       },
 
       setProjectData: (project) => {
@@ -338,6 +343,9 @@ export const useProjectWorkspaceStore = create<ProjectWorkspaceStore>()(
           projectData: project,
           projectName: project.name,
         })
+
+        // Auto-calculate project viewstate from boundary if available
+        get().recalculateProjectViewstateFromBoundary()
       },
 
       setRoutes: (routes) => {
@@ -813,12 +821,52 @@ export const useProjectWorkspaceStore = create<ProjectWorkspaceStore>()(
       },
 
       // Viewport Management
-      saveViewport: (viewport) => {
-        set({ viewport })
-      },
 
-      restoreViewport: () => {
-        // No-op for now - viewport will be managed by the map component
+      recalculateProjectViewstateFromBoundary: (mapDimensions) => {
+        const { projectData } = get()
+
+        if (!projectData?.boundaryGeoJson) {
+          console.warn("No boundary GeoJSON available to calculate viewstate")
+          return
+        }
+
+        try {
+          // Use Turf.js to calculate bounds reliably for any GeoJSON geometry type
+          const bbox = turf.bbox(projectData.boundaryGeoJson) as [
+            number,
+            number,
+            number,
+            number,
+          ]
+          // bbox format: [minLng, minLat, maxLng, maxLat]
+
+          // Calculate center point
+          const centerLng = (bbox[0] + bbox[2]) / 2
+          const centerLat = (bbox[1] + bbox[3]) / 2
+
+          // Calculate zoom to fit the bbox inside the viewport
+          const zoom = mapDimensions
+            ? calculateZoomWebMercator(bbox, mapDimensions.width, mapDimensions.height)
+            : calculateZoomWebMercator(bbox)
+
+          const viewstate: Viewport = {
+            center: { lat: centerLat, lng: centerLng },
+            zoom,
+          }
+
+          // Update projectData.viewstate directly so existing systems use it automatically
+          set({
+            projectData: {
+              ...projectData,
+              viewstate,
+            },
+          })
+        } catch (error) {
+          console.error(
+            "Failed to calculate viewstate from boundary GeoJSON:",
+            error,
+          )
+        }
       },
 
       // Reset
@@ -834,7 +882,6 @@ export const useProjectWorkspaceStore = create<ProjectWorkspaceStore>()(
             left: { visible: true, collapsed: false },
             right: { visible: false },
           },
-          viewport: null,
           showSelectedRouteSegments: false,
           showIndividualMarkers: true,
           dynamicIslandHeight: 0,
@@ -846,7 +893,6 @@ export const useProjectWorkspaceStore = create<ProjectWorkspaceStore>()(
       partialize: (state) => ({
         // Only persist UI state, not project data
         panels: state.panels,
-        viewport: state.viewport,
       }),
     },
   ),

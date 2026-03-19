@@ -537,6 +537,7 @@ const UnifiedProjectMap: React.FC<UnifiedProjectMapProps> = ({
   style,
 }) => {
   const mapMode = useProjectWorkspaceStore((state) => state.mapMode)
+  const mapType = useProjectWorkspaceStore((state) => state.mapType)
   const routes = useProjectWorkspaceStore((state) => state.routes)
   const projectData = useProjectWorkspaceStore((state) => state.projectData)
   const pendingModeSwitch = useProjectWorkspaceStore(
@@ -710,12 +711,9 @@ const UnifiedProjectMap: React.FC<UnifiedProjectMapProps> = ({
     [projectId, stretchRoadMutation, selectedRoadPriorities],
   )
 
-  // Get viewstate from project data, fallback to default
-  const defaultCenter = projectData?.viewstate?.center || {
-    lat: 28.44642679009841,
-    lng: 77.03122792287415,
-  }
-  const defaultZoom = projectData?.viewstate?.zoom || 17
+  // Get viewstate from project data (auto-calculated from boundary)
+  const defaultCenter = projectData?.viewstate?.center
+  const defaultZoom = projectData?.viewstate?.zoom
   const segmentation = useLayerStore((state) => state.segmentation)
   const roadSelection = useLayerStore((state) => state.roadSelection)
 
@@ -869,9 +867,9 @@ const UnifiedProjectMap: React.FC<UnifiedProjectMapProps> = ({
         )}
         <Map
           id="main-map"
-          mapTypeId={"hybrid"}
+          mapTypeId={mapType}
           mapId={mapId}
-          renderingType={RenderingType.RASTER}
+          renderingType={RenderingType.VECTOR}
           colorScheme={"LIGHT"}
           style={{ width: "100%", height: "100%" }}
           gestureHandling="greedy"
@@ -880,8 +878,8 @@ const UnifiedProjectMap: React.FC<UnifiedProjectMapProps> = ({
           streetViewControl={false}
           fullscreenControl={false}
           zoomControl={false}
-          defaultCenter={defaultCenter}
-          defaultZoom={defaultZoom}
+          {...(defaultCenter && { defaultCenter })}
+          {...(defaultZoom && { defaultZoom })}
           scaleControl={false}
           restriction={{
             latLngBounds: {
