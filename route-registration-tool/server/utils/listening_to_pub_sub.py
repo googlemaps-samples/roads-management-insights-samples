@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from shapely.geometry import LineString
 from .create_engine import engine
 from server.db.sql_params import prepare_text
+from server.db.backends.factory import get_backend
 from sqlalchemy import text
 from sqlalchemy.orm import scoped_session, sessionmaker
 import threading
@@ -99,51 +100,8 @@ def listen_to_pubsub(gcp_project_id, project_db_id, stop_event, gcp_project_numb
     # -------------------------------
     Session = scoped_session(sessionmaker(bind=engine))
     with engine.begin() as conn:
-        if conn.dialect.name == "sqlite":
-            conn.execute(
-                text("""
-        CREATE TABLE IF NOT EXISTS routes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            uuid TEXT NOT NULL,
-            project_id INTEGER NOT NULL,
-            route_name TEXT,
-            origin TEXT,
-            destination TEXT,
-            waypoints TEXT,
-            center TEXT,
-            encoded_polyline TEXT,
-            route_type TEXT,
-            length REAL,
-            parent_route_id TEXT,
-            has_children BOOLEAN DEFAULT FALSE,
-            is_segmented BOOLEAN DEFAULT FALSE,
-            segmentation_type TEXT,
-            segmentation_points TEXT,
-            segmentation_config TEXT,
-            sync_status TEXT CHECK(sync_status IN ('unsynced','validating','synced','invalid')) DEFAULT 'unsynced',
-            is_enabled BOOLEAN DEFAULT TRUE,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            deleted_at DATETIME,
-            tag TEXT,
-            temp_geometry TEXT,
-            start_lat REAL,
-            start_lng REAL,
-            end_lat REAL,
-            end_lng REAL,
-            min_lat REAL,
-            max_lat REAL,
-            min_lng REAL,
-            max_lng REAL,
-            latest_data_update_time DATETIME,
-            static_duration_seconds REAL,
-            current_duration_seconds REAL,
-            routes_status TEXT,
-            synced_at DATETIME,
-            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-        );
-        """)
-            )
+        backend = get_backend()
+        backend.ensure_pubsub_routes_table_schema(conn)
 
     logging.info("Database ready")
 

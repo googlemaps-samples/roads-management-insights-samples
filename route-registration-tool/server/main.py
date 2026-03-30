@@ -32,14 +32,8 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 from server.utils.connection_manager import ConnectionManager
-from server.core.db_setup import init_db_postgres, init_db_sqlite
-from server.db.config import get_database_urls, get_sqlite_filesystem_path, is_sqlite_file_database
-from server.db.database import DB, dispose_async_engine
-from server.utils.db_gcs import (
-    restore_db_from_gcs,
-    start_backup_thread,
-    stop_backup_thread,
-)
+from server.db.backends.factory import get_backend
+from server.db.database import dispose_async_engine
 from server.routes.all_routes import router as all_routes_router
 from server.utils.firebase_logger import initialize_firebase
 from server.utils.check_routes_status import RouteStatusChecker
@@ -78,18 +72,13 @@ async def lifespan(app: FastAPI):
     """Lifespan handler for startup and shutdown"""
     global global_validation_checker
 
-    async_url, _ = get_database_urls()
-    if is_sqlite_file_database(async_url):
-        sqlite_path = get_sqlite_filesystem_path(async_url) or DB
-        restore_db_from_gcs(sqlite_path)
-        init_db_sqlite()
-    else:
-        init_db_postgres()
+    backend = get_backend()
+    backend.restore_from_gcs_if_applicable()
+    backend.init_on_startup()
     # Initialize Firebase Admin SDK for route metrics logging
     initialize_firebase()
 
-    if is_sqlite_file_database(async_url):
-        start_backup_thread(get_sqlite_filesystem_path(async_url) or DB)
+    backend.start_backup_if_applicable()
 
     # Start global validation checker (checks all projects, runs every 20 seconds)
     logging.info("Starting global validation checker (runs every 20 seconds for all projects)")
@@ -99,7 +88,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown - stop backup thread and validation checker
-    stop_backup_thread()
+    backend.stop_backup_if_running()
     if global_validation_checker:
         logging.info("Stopping global validation checker")
         global_validation_checker.stop_validation_checker()
