@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     """Lifespan handler for startup and shutdown"""
 
     backend = get_backend()
-    run_migrations = true
+    run_migrations = True
     if run_migrations:
         try:
             backend.init_on_startup()

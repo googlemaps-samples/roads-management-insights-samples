@@ -888,6 +888,16 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                         onRename={(e) => handleRenameClick(e, project)}
                       />
                     ))}
+                    {isLoadingMore && (
+                      <div className="col-span-full flex justify-center py-4">
+                        <Skeleton
+                          variant="rounded"
+                          width={180}
+                          height={28}
+                          sx={{ borderRadius: "9999px" }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
