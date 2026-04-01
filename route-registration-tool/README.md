@@ -99,49 +99,21 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
 
 ## Deployment
 
-### Option 1: Secured Deployment (Recommended)
+### BigQuery Setup
 
-#### Automated via Cloud Build
-This project includes a `cloudbuild.yaml` file to automate deployment with security best practices. It uses **Google Cloud Secret Manager** to securely manage the Maps API Key.
+The route synchronization background process expects a BigQuery dataset to exist in the `US` location named `historical_roads_data` with specific tables and schema (including `GEOGRAPHY` types for spatial functions).
 
-1.  **Store your API Key in Secret Manager:**
-    ```bash
-    echo -n "YOUR_API_KEY" | gcloud secrets create ROUTE_REGISTRATION_MAPS_API_KEY --data-file=-
-    ```
+We have provided a setup script to automate this.
 
-2.  **Grant access to the Service Account:**
-    The service account used by Cloud Run (`route-registration-sa@$PROJECT_ID.iam.gserviceaccount.com`) needs the `Secret Manager Secret Accessor` role for this secret.
-
-3.  **Submit the Build:**
-    ```bash
-    gcloud builds submit --config cloudbuild.yaml .
-    ```
-
-#### Manual via CLI
-To manually deploy using secrets:
 ```bash
-gcloud run deploy route-registration-tool \
-  --project=your-google-cloud-project-id \
-  --region=us-central1 \
-  --source . \
-  --no-allow-unauthenticated \
-  --platform managed \
-  --service-account=your-service-account-email \
-  --max-instances=1 \
-  --min-instances=0 \
-  --set-secrets=GOOGLE_API_KEY=ROUTE_REGISTRATION_MAPS_API_KEY:latest
+# 1. Make the script executable
+chmod +x bq_setup.sh
+
+# 2. Run the script (it will prompt you for your configuration)
+./bq_setup.sh
 ```
 
-#### Accessing the Secured Service
-Since the service is deployed with `--no-allow-unauthenticated`, you must use a proxy to access it from your local machine:
-```bash
-gcloud run services proxy route-registration-tool --region us-central1 --port 8081
-```
-Then, open your browser and navigate to: **http://localhost:8081**
-
-### Option 2: Public Access Deployment (For Demos Only)
-
-If you need the service to be publicly accessible without authentication (accessible directly via the Cloud Run URL):
+### Deploy to Google Cloud Run
 
 ```bash
 gcloud run deploy route-registration-tool \
@@ -156,7 +128,8 @@ gcloud run deploy route-registration-tool \
 ```
 
 ### Required Permissions
-The Service Account used for deployment needs the following roles:
+
+Replace `your-google-cloud-project-id` and `your-service-account-gmail` as needed. The Service Account used for deployment needs the following roles:
 - `roles/bigquery.jobUser` (Project level)
 - `roles/bigquery.dataViewer` (Restricted to the RMI BigQuery dataset resource only)
 - `roles/datastore.user` (if Firestore logging is enabled)
@@ -164,3 +137,12 @@ The Service Account used for deployment needs the following roles:
 - `roles/roads.roadsSelectionAdmin` (Project level)
 - `roles/serviceusage.serviceUsageConsumer` (Project level)
 - `roles/secretmanager.secretAccessor` (Restricted to the `ROUTE_REGISTRATION_MAPS_API_KEY` secret resource only)
+  - A Custom IAM Role containing the following permissions:
+    - `roads.selectedRoutes.batchCreate`
+    - `roads.selectedRoutes.create`
+    - `roads.selectedRoutes.delete`
+    - `roads.selectedRoutes.get`
+    - `roads.selectedRoutes.list`
+
+
+
