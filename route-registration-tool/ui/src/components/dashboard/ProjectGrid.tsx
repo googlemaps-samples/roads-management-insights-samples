@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Add, Delete, Edit, Search, UploadFile } from "@mui/icons-material"
+import { Add, Delete, Edit, HubOutlined, Search, UploadFile } from "@mui/icons-material"
 import {
   Box,
   Card,
   CardActionArea,
   CardContent,
+  Chip,
   Fade,
   IconButton,
   Skeleton,
+  Tooltip,
   Typography,
 } from "@mui/material"
+import { alpha } from "@mui/material/styles"
 import { useQueryClient } from "@tanstack/react-query"
 import { formatDistanceToNow } from "date-fns"
 import React, { useEffect, useRef, useState } from "react"
@@ -50,6 +53,23 @@ import Button from "../common/Button"
 import Modal from "../common/Modal"
 import RenameDialog from "../common/RenameDialog"
 import SearchBar from "../common/SearchBar"
+
+function isProjectFromLinkedSession(
+  currentSessionId: string | null,
+  projectSessionId: string | null | undefined,
+): boolean {
+  const cur = currentSessionId?.trim()
+  const owned = projectSessionId?.trim()
+  if (!cur || !owned) return false
+  return cur.toLowerCase() !== owned.toLowerCase()
+}
+
+/** Short label for cards (full value is in tooltip). */
+function truncateSessionIdForCard(id: string): string {
+  const s = id.trim()
+  if (s.length <= 16) return s
+  return `${s.slice(0, 8)}…${s.slice(-4)}`
+}
 
 interface ProjectGridProps {
   projects: Project[]
@@ -138,6 +158,7 @@ const ProjectCardSkeleton: React.FC = () => {
 interface ProjectCardItemProps {
   project: Project
   routeCount?: number
+  isFromLinkedSession: boolean
   onClick: () => void
   onDelete: (e: React.MouseEvent) => void
   onRename: (e: React.MouseEvent) => void
@@ -146,6 +167,7 @@ interface ProjectCardItemProps {
 const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
   project,
   routeCount,
+  isFromLinkedSession,
   onClick,
   onDelete,
   onRename,
@@ -282,6 +304,10 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
           "& .MuiCardActionArea-focusHighlight": {
             opacity: 0,
           },
+          // Default hover tint stacks above the map/chip and makes labels hard to read.
+          "&:hover .MuiCardActionArea-focusHighlight": {
+            opacity: 0,
+          },
           position: "relative",
           zIndex: 1,
           display: "flex",
@@ -303,6 +329,98 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
             borderTopRightRadius: "24px",
           }}
         >
+          {isFromLinkedSession && project.sessionId && (
+            <Tooltip
+              arrow
+              placement="top"
+              title={
+                <Box sx={{ maxWidth: 280 }}>
+                  <Typography
+                    variant="body2"
+                    component="span"
+                    sx={{ display: "block", mb: 0.75, lineHeight: 1.4 }}
+                  >
+                    Created in a session you linked to this workspace. You can
+                    open and use it like your own projects.
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    component="code"
+                    sx={{
+                      display: "block",
+                      wordBreak: "break-all",
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontSize: "0.7rem",
+                      opacity: 0.95,
+                    }}
+                  >
+                    {project.sessionId}
+                  </Typography>
+                </Box>
+              }
+            >
+              <Box
+                component="span"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") e.stopPropagation()
+                }}
+                sx={{
+                  position: "absolute",
+                  top: 8,
+                  left: 8,
+                  zIndex: 12,
+                  display: "inline-flex",
+                  maxWidth: "calc(100% - 88px)",
+                  borderRadius: "13px",
+                  cursor: "default",
+                  "&:hover .MuiChip-root": {
+                    backgroundColor: PRIMARY_BLUE_DARK,
+                  },
+                  "&:hover .MuiChip-label, &:hover .MuiChip-icon": {
+                    color: "#ffffff",
+                  },
+                }}
+              >
+                <Chip
+                  clickable={false}
+                  icon={
+                    <HubOutlined
+                      sx={{
+                        fontSize: "14px !important",
+                        ml: "4px !important",
+                        color: `${alpha("#ffffff", 0.95)} !important`,
+                      }}
+                    />
+                  }
+                  label="Linked session"
+                  size="small"
+                  sx={{
+                    height: 26,
+                    fontSize: "0.6875rem",
+                    fontWeight: 600,
+                    letterSpacing: "0.01em",
+                    maxWidth: "100%",
+                    backgroundColor: PRIMARY_BLUE,
+                    color: "#ffffff",
+                    border: "none",
+                    boxShadow:
+                      "0 1px 2px rgba(9, 87, 208, 0.45), 0 1px 3px rgba(0, 0, 0, 0.12)",
+                    "& .MuiChip-icon": {
+                      color: `${alpha("#ffffff", 0.95)} !important`,
+                    },
+                    "& .MuiChip-label": {
+                      px: 0.75,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      color: "#ffffff",
+                    },
+                  }}
+                />
+              </Box>
+            </Tooltip>
+          )}
           {project.mapSnapshot ? (
             <img
               src={project.mapSnapshot}
@@ -342,32 +460,64 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
             borderBottomRightRadius: "24px",
             minWidth: 0,
             display: "flex",
-            alignItems: "center",
+            flexDirection: "column",
+            alignItems: "stretch",
           }}
         >
-          {/* Single line: ProjectName (count) time ago */}
-          <div
-            className="flex items-center gap-2 w-full overflow-hidden"
-            title={`${project.name} (${routeCount !== undefined ? routeCount : 0}) ${formatDate(project.updatedAt || project.createdAt)}`}
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 0.25,
+              width: "100%",
+              minWidth: 0,
+            }}
           >
-            {/* Project name and count grouped together */}
-            <div className="flex items-center gap-1 flex-1 min-w-0 overflow-hidden">
-              {/* Project name - can truncate */}
-              <span className="font-semibold text-gray-900 text-[0.9375rem] truncate">
-                {project.name}
-              </span>
-              {/* Count - always visible, doesn't shrink */}
-              {routeCount !== undefined && routeCount > 0 && (
-                <span className="font-normal text-gray-600 text-[0.9375rem] flex-shrink-0 whitespace-nowrap">
-                  ({routeCount})
+            {/* Single line: ProjectName (count) time ago */}
+            <div
+              className="flex items-center gap-2 w-full overflow-hidden"
+              title={`${project.name} (${routeCount !== undefined ? routeCount : 0}) ${formatDate(project.updatedAt || project.createdAt)}`}
+            >
+              {/* Project name and count grouped together */}
+              <div className="flex items-center gap-1 flex-1 min-w-0 overflow-hidden">
+                {/* Project name - can truncate */}
+                <span className="font-semibold text-gray-900 text-[0.9375rem] truncate">
+                  {project.name}
                 </span>
-              )}
+                {/* Count - always visible, doesn't shrink */}
+                {routeCount !== undefined && routeCount > 0 && (
+                  <span className="font-normal text-gray-600 text-[0.9375rem] flex-shrink-0 whitespace-nowrap">
+                    ({routeCount})
+                  </span>
+                )}
+              </div>
+              {/* Time - always visible, doesn't shrink */}
+              <span className="font-normal text-gray-400 text-xs whitespace-nowrap flex-shrink-0">
+                {formatDate(project.updatedAt || project.createdAt)}
+              </span>
             </div>
-            {/* Time - always visible, doesn't shrink */}
-            <span className="font-normal text-gray-400 text-xs whitespace-nowrap flex-shrink-0">
-              {formatDate(project.updatedAt || project.createdAt)}
-            </span>
-          </div>
+            {project.sessionId ? (
+              <Tooltip title={`Session ID: ${project.sessionId}`} arrow>
+                <Typography
+                  variant="caption"
+                  component="div"
+                  sx={{
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    color: "#6b7280",
+                    fontSize: "0.65rem",
+                    lineHeight: 1.35,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    cursor: "default",
+                  }}
+                >
+                  Session {truncateSessionIdForCard(project.sessionId)}
+                </Typography>
+              </Tooltip>
+            ) : null}
+          </Box>
         </CardContent>
       </CardActionArea>
     </Card>
@@ -906,6 +1056,10 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                           key={project.id}
                           project={project}
                           routeCount={routeSummaries[project.id]?.total}
+                          isFromLinkedSession={isProjectFromLinkedSession(
+                            sessionId,
+                            project.sessionId,
+                          )}
                           onClick={() => handleProjectClick(project.id)}
                           onDelete={(e) => handleDeleteClick(e, project)}
                           onRename={(e) => handleRenameClick(e, project)}

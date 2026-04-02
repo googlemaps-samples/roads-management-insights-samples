@@ -644,11 +644,21 @@ async def create_project(
     viewstate_json: str | None = None,
     session_id: str | None = None,
 ) -> Any:
-    existing_name_query = """
-    SELECT id FROM projects
-    WHERE project_name = ? AND deleted_at IS NULL
-    """
-    existing_name = await query_db(existing_name_query, (project_name,), one=True)
+    # Names are unique per session; unscoped rows (session_id NULL) stay globally unique by name.
+    if session_id is not None:
+        existing_name_query = """
+        SELECT id FROM projects
+        WHERE project_name = ? AND deleted_at IS NULL AND session_id = ?
+        """
+        existing_name = await query_db(
+            existing_name_query, (project_name, session_id), one=True
+        )
+    else:
+        existing_name_query = """
+        SELECT id FROM projects
+        WHERE project_name = ? AND deleted_at IS NULL AND session_id IS NULL
+        """
+        existing_name = await query_db(existing_name_query, (project_name,), one=True)
     if existing_name:
         raise ProjectNameConflict(
             detail=(

@@ -18,8 +18,6 @@ import uuid
 
 import pytest
 
-from server.db.common import GoogleCloudProjectIdConflict, ProjectNameConflict
-
 
 def _geojson_polygon() -> str:
     # calculate_viewstate expects rings as [lon, lat] pairs.
@@ -90,7 +88,7 @@ async def test_duplicate_project_name_conflict(monkeypatch, tmp_path):
         enable_multitenant=True,
     )
 
-    with pytest.raises(ProjectNameConflict) as exc_info:
+    with pytest.raises(projects_repo.ProjectNameConflict) as exc_info:
         await projects_repo.create_project(
             project_name="Alpha",
             jurisdiction_boundary_geojson=geojson,
@@ -102,6 +100,77 @@ async def test_duplicate_project_name_conflict(monkeypatch, tmp_path):
         )
 
     assert exc_info.value.detail == _expected_project_name_detail("Alpha")
+
+    await database.dispose_async_engine()
+
+
+@pytest.mark.asyncio
+async def test_same_project_name_allowed_for_different_sessions(monkeypatch, tmp_path):
+    database, projects_repo = await _setup_sqlite(tmp_path, monkeypatch)
+    geojson = _geojson_polygon()
+    sid_a = str(uuid.uuid4())
+    sid_b = str(uuid.uuid4())
+
+    created_a = await projects_repo.create_project(
+        project_name="SharedName",
+        jurisdiction_boundary_geojson=geojson,
+        google_cloud_project_id="gcp-a",
+        google_cloud_project_number="111",
+        subscription_id="sub-a",
+        dataset_name="dataset-a",
+        enable_multitenant=True,
+        session_id=sid_a,
+    )
+    created_b = await projects_repo.create_project(
+        project_name="SharedName",
+        jurisdiction_boundary_geojson=geojson,
+        google_cloud_project_id="gcp-b",
+        google_cloud_project_number="222",
+        subscription_id="sub-b",
+        dataset_name="dataset-b",
+        enable_multitenant=True,
+        session_id=sid_b,
+    )
+
+    assert created_a[2] == "SharedName"
+    assert created_b[2] == "SharedName"
+    assert created_a[0] != created_b[0]
+
+    await database.dispose_async_engine()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_project_name_same_session_still_conflict(
+    monkeypatch, tmp_path
+):
+    database, projects_repo = await _setup_sqlite(tmp_path, monkeypatch)
+    geojson = _geojson_polygon()
+    sid = str(uuid.uuid4())
+
+    await projects_repo.create_project(
+        project_name="Dup",
+        jurisdiction_boundary_geojson=geojson,
+        google_cloud_project_id="gcp-1",
+        google_cloud_project_number="123",
+        subscription_id="sub-1",
+        dataset_name="dataset-1",
+        enable_multitenant=True,
+        session_id=sid,
+    )
+
+    with pytest.raises(projects_repo.ProjectNameConflict) as exc_info:
+        await projects_repo.create_project(
+            project_name="Dup",
+            jurisdiction_boundary_geojson=geojson,
+            google_cloud_project_id="gcp-2",
+            google_cloud_project_number="456",
+            subscription_id="sub-2",
+            dataset_name="dataset-2",
+            enable_multitenant=True,
+            session_id=sid,
+        )
+
+    assert exc_info.value.detail == _expected_project_name_detail("Dup")
 
     await database.dispose_async_engine()
 
@@ -123,7 +192,7 @@ async def test_duplicate_gcp_project_id_raises_when_multitenant_disabled(
         enable_multitenant=False,
     )
 
-    with pytest.raises(GoogleCloudProjectIdConflict) as exc_info:
+    with pytest.raises(projects_repo.GoogleCloudProjectIdConflict) as exc_info:
         await projects_repo.create_project(
             project_name="AppProject2",
             jurisdiction_boundary_geojson=geojson,
@@ -196,7 +265,7 @@ async def test_postgres_unique_violation_maps_23505_to_project_name_conflict(
     monkeypatch.setattr(projects_repo, "query_db", fake_query_db)
 
     geojson = _geojson_polygon()
-    with pytest.raises(ProjectNameConflict) as exc_info:
+    with pytest.raises(projects_repo.ProjectNameConflict) as exc_info:
         await projects_repo.create_project(
             project_name="RaceName",
             jurisdiction_boundary_geojson=geojson,

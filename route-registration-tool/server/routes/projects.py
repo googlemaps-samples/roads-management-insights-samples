@@ -418,13 +418,30 @@ async def update_project(project_id: int, project_data: ProjectUpdate):
         if project_data.jurisdiction_boundary_geojson:
             validate_json_string(project_data.jurisdiction_boundary_geojson, "jurisdiction_boundary_geojson")
         
-        # Check for duplicate project_name (if being updated)
+        # Check for duplicate project_name within the same session scope (if being updated)
         if project_data.project_name is not None:
-            existing_name_query = """
-            SELECT id FROM projects 
-            WHERE project_name = ? AND id != ? AND deleted_at IS NULL
-            """
-            existing_name = await query_db(existing_name_query, (project_data.project_name, project_id), one=True)
+            if existing_project.session_id is not None:
+                existing_name_query = """
+                SELECT id FROM projects
+                WHERE project_name = ? AND id != ? AND deleted_at IS NULL
+                AND session_id = ?
+                """
+                existing_name = await query_db(
+                    existing_name_query,
+                    (project_data.project_name, project_id, existing_project.session_id),
+                    one=True,
+                )
+            else:
+                existing_name_query = """
+                SELECT id FROM projects
+                WHERE project_name = ? AND id != ? AND deleted_at IS NULL
+                AND session_id IS NULL
+                """
+                existing_name = await query_db(
+                    existing_name_query,
+                    (project_data.project_name, project_id),
+                    one=True,
+                )
             if existing_name:
                 raise HTTPException(
                     status_code=400,

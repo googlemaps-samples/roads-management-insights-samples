@@ -23,6 +23,8 @@ import { useLayerStore } from "./layer-store"
 export interface Project {
   id: string
   name: string
+  /** Owning session when the project is session-scoped (from API `session_id`). */
+  sessionId?: string | null
   boundaryGeoJson: any // GeoJSON boundary
   bigQueryColumn: {
     googleCloudProjectId: string

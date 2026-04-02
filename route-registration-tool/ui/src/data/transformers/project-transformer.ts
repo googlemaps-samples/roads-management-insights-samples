@@ -72,9 +72,16 @@ export const transformProject = (dbProject: any): Project => {
       }
     }
 
+    const rawSessionId = dbProject.session_id ?? dbProject.sessionId
+    const sessionId =
+      rawSessionId === undefined || rawSessionId === null || rawSessionId === ""
+        ? null
+        : String(rawSessionId)
+
     return {
       id: (dbProject.id ?? dbProject.project_id)?.toString(),
       name: dbProject.project_name || dbProject.name || "Unknown Project",
+      sessionId,
       boundaryGeoJson,
       bigQueryColumn,
       datasetName: dbProject.dataset_name || undefined,
@@ -89,9 +96,16 @@ export const transformProject = (dbProject: any): Project => {
   } catch (error) {
     console.error("Error transforming project:", error, dbProject)
     // Return default values if parsing fails
+    const rawSessionId = dbProject?.session_id ?? dbProject?.sessionId
+    const sessionId =
+      rawSessionId === undefined || rawSessionId === null || rawSessionId === ""
+        ? null
+        : String(rawSessionId)
+
     return {
       id: dbProject?.id?.toString() || "unknown",
       name: dbProject?.project_name || dbProject?.name || "Unknown Project",
+      sessionId,
       boundaryGeoJson: {
         type: "Polygon",
         coordinates: [

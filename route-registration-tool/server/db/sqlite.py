@@ -184,12 +184,20 @@ def init_db_sqlite() -> None:
         )
     conn.commit()
 
-    # Create unique indexes for projects table
+    # Project names: unique per session; unscoped projects (session_id NULL) unique by name globally.
+    cursor.execute("DROP INDEX IF EXISTS idx_projects_name_unique")
     cursor.execute(
         """
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_unique 
-    ON projects(project_name) 
-    WHERE deleted_at IS NULL
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_session_name_unique
+    ON projects(session_id, project_name)
+    WHERE deleted_at IS NULL AND session_id IS NOT NULL
+    """
+    )
+    cursor.execute(
+        """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_unscoped_name_unique
+    ON projects(project_name)
+    WHERE deleted_at IS NULL AND session_id IS NULL
     """
     )
 
