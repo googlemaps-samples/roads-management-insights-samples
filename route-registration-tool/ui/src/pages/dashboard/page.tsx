@@ -25,10 +25,21 @@ import { useInfiniteProjects } from "../../hooks/use-api"
 import SessionManagerDialog from "../../components/session/SessionManagerDialog"
 import DashboardTour from "../../components/tour/DashboardTour"
 import { clearAllLayers } from "../../utils/clear-all-layers"
+import { toast } from "../../utils/toast"
 import ContentCopyIcon from "@mui/icons-material/ContentCopy"
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline"
+import LinkIcon from "@mui/icons-material/Link"
 import ShareIcon from "@mui/icons-material/Share"
-import { Box, IconButton, Tooltip, Typography } from "@mui/material"
+import {
+  Box,
+  IconButton,
+  InputAdornment,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
+} from "@mui/material"
+import { alpha } from "@mui/material/styles"
 import { useSessionId } from "../../hooks/use-session-id"
 import { buildSessionPath } from "../../utils/session"
 
@@ -168,8 +179,9 @@ export default function DashboardPage() {
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text)
+      toast.success("Copied to clipboard", { duration: 1500 })
     } catch {
-      // no-op; toast is handled by existing ToastContainer patterns elsewhere
+      toast.error("Failed to copy", { duration: 2500 })
     }
   }
 
@@ -196,122 +208,225 @@ export default function DashboardPage() {
             open={sessionIntroOpen}
             onClose={handleSessionIntroClose}
             maxWidth="sm"
-            title="Your session workspace"
+            title={
+              <Typography
+                component="div"
+                sx={{
+                  fontSize: 18,
+                  fontFamily: '"Google Sans", sans-serif',
+                  fontWeight: 500,
+                  color: "#202124",
+                  lineHeight: "24px",
+                  letterSpacing: "0",
+                }}
+              >
+                Your session workspace
+              </Typography>
+            }
+            titleSx={{ paddingBottom: "4px" }}
+            contentSx={{
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              overflowY: "auto",
+              paddingTop: "16px",
+              paddingBottom: "8px",
+            }}
+            actionsSx={{ paddingTop: "4px", paddingBottom: "16px" }}
             actions={
               <div className="flex gap-2">
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    void copyToClipboard(dashboardLink)
-                  }}
-                  startIcon={<ContentCopyIcon fontSize="small" />}
-                >
-                  Copy session link
-                </Button>
-                <Button onClick={handleSessionIntroClose} variant="contained">
+                <Button variant="contained" onClick={handleSessionIntroClose}>
                   Got it
                 </Button>
               </div>
             }
           >
-            <div className="space-y-4">
+            <Stack spacing={3} sx={{ minHeight: 0, flex: 1 }}>
               <Typography
                 variant="body1"
-                className="text-gray-800"
-                sx={{ lineHeight: 1.6 }}
+                sx={{
+                  lineHeight: 1.55,
+                  color: "text.primary",
+                  letterSpacing: "0.1px",
+                }}
               >
                 This dashboard is tied to a session link. Anyone with the link can
                 access it (link-based sharing).
               </Typography>
 
-              <Box
-                sx={{
-                  border: "1px solid #e5e7eb",
-                  backgroundColor: "#f9fafb",
-                  borderRadius: 2,
-                  padding: 2,
-                }}
-              >
+              <Stack spacing={1.75}>
                 <Typography
                   variant="subtitle2"
-                  className="text-gray-900 mb-1"
-                  sx={{ fontWeight: 600 }}
-                >
-                  Session dashboard link
-                </Typography>
-                <Typography
-                  variant="body2"
-                  className="text-gray-700"
                   sx={{
-                    fontFamily:
-                      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                    wordBreak: "break-all",
-                    lineHeight: 1.55,
+                    fontWeight: 700,
+                    color: "text.primary",
+                    letterSpacing: "0.15px",
+                    fontSize: 13,
+                    display: "block",
+                    mb: 0.25,
                   }}
                 >
-                  {dashboardLink}
+                  Your session
                 </Typography>
 
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <Typography variant="caption" className="text-gray-600">
-                    Session ID
-                  </Typography>
-                  <div className="min-w-0 flex items-center gap-2">
-                    <Typography
-                      variant="caption"
-                      className="text-gray-800"
-                      sx={{
+                <Stack spacing={1.75}>
+                  <TextField
+                    label="Session ID"
+                    value={sessionId}
+                    fullWidth
+                    size="small"
+                    InputProps={{
+                      readOnly: true,
+                      sx: {
+                        fontSize: 13,
                         fontFamily:
                           'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                        wordBreak: "break-all",
-                      }}
-                    >
-                      {sessionId}
-                    </Typography>
-                    <Tooltip title="Copy session ID" arrow>
-                      <IconButton
-                        size="small"
-                        aria-label="Copy session ID"
-                        onClick={() => {
-                          if (!sessionId) return
-                          void copyToClipboard(sessionId)
-                        }}
-                        sx={{
-                          border: "1px solid #e5e7eb",
-                          backgroundColor: "#ffffff",
-                          "&:hover": { backgroundColor: "#ffffff" },
-                        }}
-                      >
-                        <ContentCopyIcon fontSize="inherit" />
-                      </IconButton>
-                    </Tooltip>
-                  </div>
-                </div>
-              </Box>
+                      },
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Tooltip title="Copy session ID" arrow>
+                            <span>
+                              <IconButton
+                                size="small"
+                                aria-label="Copy session ID"
+                                onClick={() => void copyToClipboard(sessionId)}
+                                sx={{
+                                  borderRadius: 2,
+                                  color: "text.secondary",
+                                  "&:hover": { backgroundColor: "action.hover" },
+                                }}
+                              >
+                                <ContentCopyIcon fontSize="inherit" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      "& .MuiInputLabel-root": { fontSize: 12 },
+                    }}
+                  />
+
+                  <TextField
+                    label="Dashboard link"
+                    value={dashboardLink}
+                    fullWidth
+                    size="small"
+                    InputProps={{
+                      readOnly: true,
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <LinkIcon fontSize="small" style={{ opacity: 0.7 }} />
+                        </InputAdornment>
+                      ),
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Tooltip title="Copy dashboard link" arrow>
+                            <span>
+                              <IconButton
+                                size="small"
+                                disabled={!dashboardLink}
+                                aria-label="Copy dashboard link"
+                                onClick={() => {
+                                  if (!dashboardLink) return
+                                  void copyToClipboard(dashboardLink)
+                                }}
+                                sx={{
+                                  borderRadius: 2,
+                                  color: "text.secondary",
+                                  "&:hover": { backgroundColor: "action.hover" },
+                                }}
+                              >
+                                <ShareIcon fontSize="inherit" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      "& .MuiInputLabel-root": { fontSize: 12 },
+                      "& .MuiInputBase-input": {
+                        fontSize: 13,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      },
+                    }}
+                  />
+                </Stack>
+              </Stack>
 
               <Box
-                sx={{
-                  borderLeft: "4px solid rgba(25, 118, 210, 0.7)",
-                  backgroundColor: "rgba(25, 118, 210, 0.06)",
-                  borderRadius: 2,
-                  padding: 2,
+                sx={(theme) => {
+                  const br = theme.shape.borderRadius
+                  return {
+                  borderRadius:
+                    typeof br === "number" ? `${br}px` : br,
+                  border: `1px solid ${alpha(theme.palette.text.primary, 0.23)}`,
+                  backgroundColor: theme.palette.background.paper,
+                  px: 1.75,
+                  py: 1.5,
+                  transition: theme.transitions.create(["border-color"], {
+                    duration: theme.transitions.duration.shorter,
+                  }),
+                  "@media (hover: hover)": {
+                    "&:hover": {
+                      borderColor: alpha(theme.palette.text.primary, 0.87),
+                    },
+                  },
+                }
                 }}
               >
-                <Typography variant="body2" className="text-gray-700">
-                  Tip: You can link another session to view its projects from this
-                  workspace.
-                </Typography>
-                <div className="mt-2">
+                <Stack spacing={1}>
+                  <Typography
+                    variant="subtitle2"
+                    sx={{
+                      fontWeight: 700,
+                      color: "text.primary",
+                      letterSpacing: "0.15px",
+                      fontSize: 13,
+                    }}
+                  >
+                    Link another session
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "text.secondary",
+                      lineHeight: 1.55,
+                      fontSize: 13,
+                    }}
+                  >
+                    View projects from another session in this workspace. The other
+                    person must open their session link at least once.
+                  </Typography>
                   <Button
                     variant="text"
                     onClick={() => setSessionManagerOpen(true)}
-                    startIcon={<ShareIcon fontSize="small" />}
+                    startIcon={
+                      <LinkIcon sx={{ fontSize: 18, opacity: 0.85 }} />
+                    }
+                    sx={{
+                      alignSelf: "flex-start",
+                      mt: 0.25,
+                      ml: -1,
+                      minHeight: 36,
+                      py: 0.5,
+                      px: 1,
+                      fontSize: 13,
+                      fontWeight: 500,
+                      textTransform: "none",
+                      color: "primary.main",
+                      "& .MuiButton-startIcon": { mr: 0.75 },
+                    }}
                   >
                     Manage session sharing
                   </Button>
-                </div>
+                </Stack>
               </Box>
-            </div>
+            </Stack>
           </Modal>
         )}
 

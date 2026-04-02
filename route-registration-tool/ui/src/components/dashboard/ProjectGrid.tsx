@@ -716,70 +716,66 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                   maxHeight: "calc(100vh - 300px)",
                 }}
               >
-                {(effectiveIsLoading ||
-                  totalProjects > 0 ||
-                  searchQuery.trim().length > 0) && (
-                    <div className="mb-4 flex-shrink-0">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-4 border-b border-gray-200">
-                        <Typography
-                          variant="h6"
-                          className="font-semibold text-gray-900 text-base sm:text-lg"
-                        >
-                          All projects{" "}
-                          {!effectiveIsLoading && (
-                            <span className="text-gray-500 font-normal">
-                              ({totalProjects})
-                            </span>
-                          )}
-                        </Typography>
-                        <div className="flex items-center gap-3 flex-1 sm:flex-initial sm:justify-end">
-                          <Box
-                            sx={{
-                              width: {
-                                xs: "100%",
-                                sm: searchQuery.trim().length > 0 ? "320px" : "210px",
-                              },
+                <div className="mb-4 flex-shrink-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-4 border-b border-gray-200">
+                    <Typography
+                      variant="h6"
+                      className="font-semibold text-gray-900 text-base sm:text-lg"
+                    >
+                      All projects{" "}
+                      {!effectiveIsLoading && (
+                        <span className="text-gray-500 font-normal">
+                          ({totalProjects})
+                        </span>
+                      )}
+                    </Typography>
+                    <div className="flex items-center gap-3 flex-1 sm:flex-initial sm:justify-end">
+                      <Box
+                        sx={{
+                          width: {
+                            xs: "100%",
+                            sm: searchQuery.trim().length > 0 ? "320px" : "210px",
+                          },
+                          maxWidth: "100%",
+                          transition: "width 280ms cubic-bezier(0.4, 0, 0.2, 1)",
+                          "&:focus-within": {
+                            width: { xs: "100%", sm: "320px" },
+                          },
+                        }}
+                      >
+                        <div data-tour="project-search">
+                          <SearchBar
+                            placeholder="Search projects..."
+                            value={searchQuery}
+                            onChange={onSearchChange}
+                            disabled={false}
+                            searchSx={{
+                              backgroundColor: "#ffffff",
+                              borderRadius: "24px",
+                              border: "1px solid #e5e7eb",
+                              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+                              width: "100%",
                               maxWidth: "100%",
-                              transition: "width 280ms cubic-bezier(0.4, 0, 0.2, 1)",
+                              minWidth: "180px",
+                              transition:
+                                "border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                              "&:hover": {
+                                backgroundColor: "#ffffff",
+                                borderColor: "#d1d5db",
+                                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.08)",
+                              },
                               "&:focus-within": {
-                                width: { xs: "100%", sm: "320px" },
+                                borderColor: PRIMARY_BLUE,
+                                boxShadow:
+                                  "0 0 0 3px rgba(9, 87, 208, 0.1), 0 2px 4px rgba(0, 0, 0, 0.08)",
                               },
                             }}
-                          >
-                            <div data-tour="project-search">
-                              <SearchBar
-                                placeholder="Search projects..."
-                                value={searchQuery}
-                                onChange={onSearchChange}
-                                disabled={false}
-                                searchSx={{
-                                  backgroundColor: "#ffffff",
-                                  borderRadius: "24px",
-                                  border: "1px solid #e5e7eb",
-                                  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-                                  width: "100%",
-                                  maxWidth: "100%",
-                                  minWidth: "180px",
-                                  transition:
-                                    "border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-                                  "&:hover": {
-                                    backgroundColor: "#ffffff",
-                                    borderColor: "#d1d5db",
-                                    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.08)",
-                                  },
-                                  "&:focus-within": {
-                                    borderColor: PRIMARY_BLUE,
-                                    boxShadow:
-                                      "0 0 0 3px rgba(9, 87, 208, 0.1), 0 2px 4px rgba(0, 0, 0, 0.08)",
-                                  },
-                                }}
-                              />
-                            </div>
-                          </Box>
+                          />
                         </div>
-                      </div>
+                      </Box>
                     </div>
-                  )}
+                  </div>
+                </div>
 
                 {effectiveIsLoading ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-3 sm:gap-x-4 gap-y-6 sm:gap-y-8 overflow-y-auto pretty-scrollbar items-start flex-1 min-h-0">
