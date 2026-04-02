@@ -23,6 +23,7 @@ import { useMemo } from "react"
 import { RoadPriority } from "../constants/road-priorities"
 import {
   bigqueryApi,
+  clientConfigApi,
   googleRoutesApi,
   placesApi,
   polygonsApi,
@@ -67,6 +68,7 @@ export const queryKeys = {
   placeDetails: (placeId: string) => ["places", "details", placeId] as const,
   bigqueryDatasets: (projectId: string) =>
     ["bigquery", "datasets", projectId] as const,
+  clientConfig: ["clientConfig"] as const,
 }
 
 // Projects hooks
@@ -80,6 +82,14 @@ export const useProjects = () => {
       return response.data
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+}
+
+export const useClientConfig = () => {
+  return useQuery({
+    queryKey: queryKeys.clientConfig,
+    queryFn: () => clientConfigApi.get(),
+    staleTime: 60 * 60 * 1000,
   })
 }
 

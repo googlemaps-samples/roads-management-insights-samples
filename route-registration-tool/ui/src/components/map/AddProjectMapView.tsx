@@ -37,14 +37,15 @@ function MapWithGeoJson({ boundaryGeoJson }: { boundaryGeoJson?: any }) {
   }, [map])
 
   useEffect(() => {
-    if (!boundaryGeoJson || !dataLayerRef.current || !map) return
+    if (!dataLayerRef.current || !map) return
 
     const dataLayer = dataLayerRef.current
 
-    // Clear existing features
     dataLayer.forEach((feature) => {
       dataLayer.remove(feature)
     })
+
+    if (!boundaryGeoJson) return
 
     // Add new GeoJSON
     try {

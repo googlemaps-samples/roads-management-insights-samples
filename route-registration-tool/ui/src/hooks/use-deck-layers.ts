@@ -30,9 +30,13 @@ import { createSnappedRoadsLayer } from "../stores/layer-store/renderers/route-r
 import { createSegmentationLayers } from "../stores/layer-store/renderers/segment-renderers"
 import { useProjectWorkspaceStore } from "../stores/project-workspace-store"
 import { useUserPreferencesStore } from "../stores/user-preferences-store"
+import { useClientConfig } from "./use-api"
 import { useRouteSelection } from "./use-route-selection"
 
 export function useDeckLayers(projectId: string) {
+  const { data: clientConfig } = useClientConfig()
+  const omitJurisdictionBoundary =
+    clientConfig?.enable_multitenant === true
   const mapMode = useProjectWorkspaceStore((state) => state.mapMode)
   const mapType = useProjectWorkspaceStore((state) => state.mapType)
   const selectedRoute = useProjectWorkspaceStore((state) => state.selectedRoute)
@@ -170,7 +174,7 @@ export function useDeckLayers(projectId: string) {
 
     // Add jurisdiction boundary layer first (renders behind other features)
     const boundaryLayer = createJurisdictionBoundaryLayer(
-      boundaryGeoJson,
+      omitJurisdictionBoundary ? null : boundaryGeoJson,
       mapType,
     )
     if (boundaryLayer) result.push(boundaryLayer)
@@ -564,6 +568,7 @@ export function useDeckLayers(projectId: string) {
     roadImport.lassoFilteredRoadIds?.length,
     roadImport.lassoSelectedPriorities,
     currentZoom, // Add currentZoom for arrow generation
+    omitJurisdictionBoundary,
   ])
 
   return layers

@@ -31,16 +31,20 @@ import { downloadSampleGeoJson } from "../../utils/geojson-validation"
 
 interface HelpPanelProps {
   step: number // 0 = GCP, 1 = Dataset Name, 2 = Project Name, 3 = Jurisdiction Boundary
+  /** When true, step is the shortened create flow (0 = Project Name, 1 = Boundary). */
+  multitenantProjectCreation?: boolean
   minimized: boolean
   onToggleMinimize: () => void
 }
 
 export default function HelpPanel({
   step,
+  multitenantProjectCreation = false,
   minimized,
   onToggleMinimize,
 }: HelpPanelProps) {
   const [isGifHovered, setIsGifHovered] = useState(false)
+  const helpStep = multitenantProjectCreation ? step + 2 : step
 
   return (
     <Box
@@ -86,7 +90,7 @@ export default function HelpPanel({
         >
           <Box className="space-y-4">
             {/* Conditional Content Based on Step */}
-            {step === 0 && (
+            {helpStep === 0 && (
               <>
                 {/* GIF Section */}
                 <Box
@@ -334,7 +338,7 @@ export default function HelpPanel({
               </>
             )}
 
-            {step === 1 && (
+            {helpStep === 1 && (
               <>
                 {/* GIF Section */}
                 <Box
@@ -520,7 +524,7 @@ export default function HelpPanel({
               </>
             )}
 
-            {step === 2 && (
+            {helpStep === 2 && (
               <>
                 {/* Project Name Info */}
                 <Box
@@ -561,7 +565,7 @@ export default function HelpPanel({
               </>
             )}
 
-            {step === 3 && (
+            {helpStep === 3 && (
               <>
                 {/* Jurisdiction Boundary Info */}
                 <Box
@@ -909,7 +913,7 @@ export default function HelpPanel({
                 onClick={(e) => e.stopPropagation()}
               >
                 <img
-                  src={step === 0 ? projectInfoGif : datasetNameGif}
+                  src={helpStep === 0 ? projectInfoGif : datasetNameGif}
                   alt="Help illustration - enlarged"
                   className="max-w-full max-h-full rounded-lg shadow-2xl"
                   style={{ objectFit: "contain" }}

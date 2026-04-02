@@ -12,21 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Re-export all API modules
-export { projectsApi } from "./projects-api"
-export { routesApi } from "./routes-api"
-export { roadsApi } from "./roads-api"
-export { polygonsApi } from "./polygons-api"
-export { googleRoutesApi } from "./google-routes-api"
-export { placesApi } from "./places-api"
-export { usersApi } from "./users-api"
-export { bigqueryApi } from "./bigquery-api"
-export { clientConfigApi } from "./client-config-api"
+import { apiClient } from "../api-client"
 
-// Re-export API types
-export type {
-  ApiResponse,
-  PaginatedResponse,
-  RouteSaveRequest,
-  RouteSaveResponse,
-} from "../api-types"
+export interface ClientConfig {
+  enable_multitenant: boolean
+}
+
+export const clientConfigApi = {
+  get: async (): Promise<ClientConfig> => {
+    return apiClient.get<ClientConfig>("/client-config")
+  },
+}

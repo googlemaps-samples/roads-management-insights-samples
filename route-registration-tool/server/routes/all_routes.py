@@ -35,10 +35,12 @@ from .export import router as export_router
 from .import_project import router as import_project_router
 from .stretch_roads import router as stretch_roads_router
 from .bigquery import router as bigquery_router
+from .client_config import router as client_config_router
 
 # Create a single router that includes all others
 router = APIRouter()
 
+router.include_router(client_config_router, prefix="")
 router.include_router(routes_router, prefix="", tags=["Routes"])
 router.include_router(roads_router, prefix="", tags=["Roads"])
 # router.include_router(roads_connectivity_router, prefix="", tags=["Roads Connectivity"])

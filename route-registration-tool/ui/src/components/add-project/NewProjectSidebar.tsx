@@ -14,11 +14,11 @@
 
 // ui/src/components/add-project/NewProjectSidebar.tsx
 import { Box, CircularProgress, Paper, Typography } from "@mui/material"
-import React, { useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { FormProvider, useForm } from "react-hook-form"
 import { useNavigate } from "react-router-dom"
 
-import { useCreateProject, useProjects } from "../../hooks/use-api"
+import { useClientConfig, useCreateProject, useProjects } from "../../hooks/use-api"
 import { useProjectCreationStore } from "../../stores"
 import { RegionCreationFormData } from "../../types/region-creation"
 import { clearAllLayers } from "../../utils/clear-all-layers"
@@ -29,12 +29,37 @@ import GcpProjectSelector from "./GcpProjectSelector"
 import GeoJsonUploader from "./GeoJsonUploader"
 import ProjectNameForm from "./ProjectNameForm"
 
-const steps = [
+/** WGS84 polygon covering the full globe (multi-tenant default jurisdiction). */
+const WORLD_JURISDICTION_GEO_JSON: GeoJSON.FeatureCollection = {
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      properties: {},
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-180, -90],
+            [180, -90],
+            [180, 90],
+            [-180, 90],
+            [-180, -90],
+          ],
+        ],
+      },
+    },
+  ],
+}
+
+const FULL_FLOW_STEPS = [
   "Google Cloud Project",
   "Dataset Name",
   "Project Name",
   "Jurisdiction Boundary",
-]
+] as const
+
+const MULTITENANT_FLOW_STEPS = ["Project Name"] as const
 
 interface NewProjectSidebarProps {
   onStepChange?: (step: number) => void
@@ -45,6 +70,14 @@ export default function NewProjectSidebar({
 }: NewProjectSidebarProps) {
   const navigate = useNavigate()
   const [activeStep, setActiveStep] = useState(0)
+  const didApplyMultitenantDefaults = useRef(false)
+
+  const { data: clientConfig, isPending: isClientConfigPending } =
+    useClientConfig()
+  const isMultitenant = clientConfig?.enable_multitenant === true
+  const stepLabels = isMultitenant
+    ? MULTITENANT_FLOW_STEPS
+    : FULL_FLOW_STEPS
 
   // Notify parent of step changes
   React.useEffect(() => {
@@ -108,10 +141,45 @@ export default function NewProjectSidebar({
     watch,
     trigger,
     getValues,
+    setValue,
     formState: hookFormState,
   } = methods
   const watchedValues = watch()
   const { errors } = hookFormState
+
+  useEffect(() => {
+    if (!isMultitenant || didApplyMultitenantDefaults.current) return
+    const list = existingProjects
+    if (!list?.length) return
+    didApplyMultitenantDefaults.current = true
+    const first = list[0]
+    setValue(
+      "googleCloudProjectId",
+      first.bigQueryColumn.googleCloudProjectId ?? "",
+      { shouldValidate: true, shouldDirty: false },
+    )
+    setValue(
+      "googleCloudProjectNumber",
+      first.bigQueryColumn.googleCloudProjectNumber ?? "",
+      { shouldValidate: true, shouldDirty: false },
+    )
+    setValue("subscriptionId", first.bigQueryColumn.subscriptionId ?? "", {
+      shouldValidate: true,
+      shouldDirty: false,
+    })
+    setValue("datasetName", first.datasetName?.trim() || "historical_roads_data", {
+      shouldValidate: true,
+      shouldDirty: false,
+    })
+  }, [isMultitenant, existingProjects, setValue])
+
+  useEffect(() => {
+    if (!isMultitenant || isClientConfigPending) return
+    updateGeoJsonState({
+      uploadedGeoJson: WORLD_JURISDICTION_GEO_JSON,
+      error: null,
+    })
+  }, [isMultitenant, isClientConfigPending, updateGeoJsonState])
 
   // File upload with strict validation
   const handleFileUpload = (file: File) => {
@@ -293,7 +361,7 @@ export default function NewProjectSidebar({
     e.preventDefault()
 
     // If not on last step, go to next step instead of submitting
-    if (activeStep < steps.length - 1) {
+    if (activeStep < stepLabels.length - 1) {
       await handleNext()
       return
     }
@@ -313,7 +381,11 @@ export default function NewProjectSidebar({
     updateFormState({ isLoading: true, error: null })
 
     try {
-      if (!geoJsonState.uploadedGeoJson) {
+      const boundaryGeoJson = isMultitenant
+        ? (geoJsonState.uploadedGeoJson ?? WORLD_JURISDICTION_GEO_JSON)
+        : geoJsonState.uploadedGeoJson
+
+      if (!boundaryGeoJson) {
         const errorMsg = "Please upload a valid GeoJSON boundary"
         toast.error("Missing Boundary", {
           description: errorMsg,
@@ -332,7 +404,7 @@ export default function NewProjectSidebar({
 
       const projectData = {
         name: data.name,
-        boundaryGeoJson: geoJsonState.uploadedGeoJson,
+        boundaryGeoJson,
         bigQueryColumn: {
           googleCloudProjectId: data.googleCloudProjectId,
           googleCloudProjectNumber: data.googleCloudProjectNumber,
@@ -378,6 +450,12 @@ export default function NewProjectSidebar({
 
   // Step validation - checks both field values and form validation errors
   const isStepValid = (step: number): boolean => {
+    if (isMultitenant) {
+      if (step !== 0) return false
+      const hasName = watchedValues.name.trim() !== ""
+      const hasNameError = !!errors.name
+      return hasName && !hasNameError
+    }
     switch (step) {
       case 0: {
         // Step 1: GCP Project - check values and validation errors
@@ -409,37 +487,36 @@ export default function NewProjectSidebar({
   }
 
   const handleNext = async () => {
-    // Trigger validation for current step
     let isValid = false
 
-    switch (activeStep) {
-      case 0: {
-        // Validate GCP Project fields
-        const gcpValid = await trigger([
-          "googleCloudProjectId",
-          "googleCloudProjectNumber",
-        ])
-        isValid = gcpValid && isStepValid(activeStep)
-        break
+    if (isMultitenant) {
+      isValid = false
+    } else {
+      switch (activeStep) {
+        case 0: {
+          const gcpValid = await trigger([
+            "googleCloudProjectId",
+            "googleCloudProjectNumber",
+          ])
+          isValid = gcpValid && isStepValid(activeStep)
+          break
+        }
+        case 1: {
+          const datasetNameValid = await trigger("datasetName")
+          isValid = datasetNameValid && isStepValid(activeStep)
+          break
+        }
+        case 2: {
+          const nameValid = await trigger("name")
+          isValid = nameValid && isStepValid(activeStep)
+          break
+        }
+        case 3:
+          isValid = isStepValid(activeStep)
+          break
+        default:
+          isValid = false
       }
-      case 1: {
-        // Validate Dataset Name
-        const datasetNameValid = await trigger("datasetName")
-        isValid = datasetNameValid && isStepValid(activeStep)
-        break
-      }
-      case 2: {
-        // Validate Project Name
-        const nameValid = await trigger("name")
-        isValid = nameValid && isStepValid(activeStep)
-        break
-      }
-      case 3:
-        // Validate GeoJSON
-        isValid = isStepValid(activeStep)
-        break
-      default:
-        isValid = false
     }
 
     if (isValid) {
@@ -454,6 +531,14 @@ export default function NewProjectSidebar({
   const isLoading = formState.isLoading || createProjectMutation.isPending
 
   const renderStepContent = (step: number) => {
+    if (isMultitenant) {
+      if (step !== 0) return null
+      return (
+        <Box className="py-3">
+          <ProjectNameForm validateProjectName={validateProjectName} />
+        </Box>
+      )
+    }
     switch (step) {
       case 0:
         return (
@@ -510,17 +595,30 @@ export default function NewProjectSidebar({
           Create New Project
         </Typography>
         <Typography variant="caption" className="text-mui-secondary text-xs">
-          Step {activeStep + 1} of {steps.length}: {steps[activeStep]}
+          {isClientConfigPending ? (
+            "Loading…"
+          ) : (
+            <>
+              Step {activeStep + 1} of {stepLabels.length}:{" "}
+              {stepLabels[activeStep]}
+            </>
+          )}
         </Typography>
       </Box>
 
       {/* Content */}
       <Box className="flex-1 overflow-auto pretty-scrollbar px-4">
-        <FormProvider {...methods}>
-          <form onSubmit={handleFormSubmit}>
-            {renderStepContent(activeStep)}
-          </form>
-        </FormProvider>
+        {isClientConfigPending ? (
+          <Box className="flex justify-center items-center py-12">
+            <CircularProgress size={28} />
+          </Box>
+        ) : (
+          <FormProvider {...methods}>
+            <form onSubmit={handleFormSubmit}>
+              {renderStepContent(activeStep)}
+            </form>
+          </FormProvider>
+        )}
       </Box>
 
       {/* Navigation Buttons */}
@@ -528,7 +626,7 @@ export default function NewProjectSidebar({
         <Box className="flex gap-2">
           <Button
             onClick={handleCancel}
-            disabled={isLoading}
+            disabled={isLoading || isClientConfigPending}
             variant="outlined"
             // size="small"
             className="flex-1 "
@@ -538,7 +636,7 @@ export default function NewProjectSidebar({
           {activeStep > 0 && (
             <Button
               onClick={handleBack}
-              disabled={isLoading}
+              disabled={isLoading || isClientConfigPending}
               variant="outlined"
               // size="small"
               className="flex-1 "
@@ -546,10 +644,12 @@ export default function NewProjectSidebar({
               Back
             </Button>
           )}
-          {activeStep < steps.length - 1 ? (
+          {activeStep < stepLabels.length - 1 ? (
             <Button
               onClick={handleNext}
-              disabled={!isStepValid(activeStep) || isLoading}
+              disabled={
+                !isStepValid(activeStep) || isLoading || isClientConfigPending
+              }
               variant="contained"
               // size="small"
               className="flex-1 "
@@ -559,7 +659,11 @@ export default function NewProjectSidebar({
           ) : (
             <Button
               onClick={handleSubmit(onSubmit)}
-              disabled={!isStepValid(activeStep) || isLoading}
+              disabled={
+                !isStepValid(activeStep) ||
+                isLoading ||
+                isClientConfigPending
+              }
               variant="contained"
               size="small"
               className="flex-1 text-xs"

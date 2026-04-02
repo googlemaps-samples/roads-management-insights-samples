@@ -20,12 +20,14 @@ import ToastContainer from "../../components/common/ToastContainer"
 import Main from "../../components/layout/Main"
 import PageLayout from "../../components/layout/PageLayout"
 import AddProjectMapView from "../../components/map/AddProjectMapView"
+import { useClientConfig } from "../../hooks/use-api"
 import { useProjectCreationStore } from "../../stores"
 import { getGoogleMapsApiKey } from "../../utils/api-helpers"
 
 export default function AddProjectPage() {
   const [helpPanelMinimized, setHelpPanelMinimized] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
+  const { data: clientConfig } = useClientConfig()
   const geoJsonState = useProjectCreationStore((state) => state.geoJsonState)
   const clearProjectCreationState = useProjectCreationStore(
     (state) => state.clearProjectCreationState,
@@ -54,15 +56,18 @@ export default function AddProjectPage() {
   }, [clearProjectCreationState])
 
   const apiKey = getGoogleMapsApiKey()
+  const multitenantMode = clientConfig?.enable_multitenant === true
 
   return (
     <PageLayout>
       <Main>
         <div className="flex-1 relative h-full w-full">
-          {/* Map Background */}
+          {/* Map Background — hide jurisdiction overlay in multi-tenant (world boundary is implicit) */}
           <AddProjectMapView
             apiKey={apiKey}
-            boundaryGeoJson={geoJsonState.uploadedGeoJson}
+            boundaryGeoJson={
+              multitenantMode ? null : geoJsonState.uploadedGeoJson
+            }
             style={{ width: "100%", height: "100%" }}
           />
 
@@ -72,6 +77,7 @@ export default function AddProjectPage() {
           {/* Help Panel - Always open, content changes based on step */}
           <HelpPanel
             step={currentStep}
+            multitenantProjectCreation={multitenantMode}
             minimized={helpPanelMinimized}
             onToggleMinimize={() => setHelpPanelMinimized(!helpPanelMinimized)}
           />
