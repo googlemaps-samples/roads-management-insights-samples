@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import staticMapImage from "../../assets/images/static_map.png"
 import Button from "../../components/common/Button"
@@ -43,12 +43,30 @@ import { alpha } from "@mui/material/styles"
 import { useSessionId } from "../../hooks/use-session-id"
 import { buildSessionPath } from "../../utils/session"
 
+const DISCLAIMER_STORAGE_KEY = "route_registration_tool_disclaimer_seen"
+
+function getDisclaimerMessage(): string {
+  const windowMessage = (window as unknown as Record<string, unknown>)
+    .DISCLAIMER_MESSAGE
+  const envMessage = import.meta.env.VITE_DISCLAIMER_MESSAGE
+  return String(windowMessage ?? envMessage ?? "").trim()
+}
+
+function hasDisclaimerBeenSeen(): boolean {
+  try {
+    return window.localStorage.getItem(DISCLAIMER_STORAGE_KEY) === "true"
+  } catch {
+    return false
+  }
+}
+
 export default function DashboardPage() {
   const sessionId = useSessionId()
   const [searchQuery, setSearchQuery] = useState("")
   const [disclaimerOpen, setDisclaimerOpen] = useState(false)
   const [disclaimerMessage, setDisclaimerMessage] = useState<string | null>(null)
   const [sessionIntroOpen, setSessionIntroOpen] = useState(false)
+  const deferSessionIntroUntilDisclaimerRef = useRef(false)
   const [sessionManagerOpen, setSessionManagerOpen] = useState(false)
   const [tourOpen, setTourOpen] = useState(false)
   const [pendingTourAfterIntro, setPendingTourAfterIntro] = useState(false)
@@ -87,8 +105,20 @@ export default function DashboardPage() {
     const key = `rst_session_intro_seen_${sessionId}`
     try {
       const seen = window.localStorage.getItem(key) === "true"
-      if (!seen) queueMicrotask(() => setSessionIntroOpen(true))
+      if (seen) return
+
+      const disclaimerMsg = getDisclaimerMessage()
+      const disclaimerMustShowFirst =
+        disclaimerMsg.length > 0 && !hasDisclaimerBeenSeen()
+
+      if (disclaimerMustShowFirst) {
+        deferSessionIntroUntilDisclaimerRef.current = true
+        return
+      }
+      deferSessionIntroUntilDisclaimerRef.current = false
+      queueMicrotask(() => setSessionIntroOpen(true))
     } catch {
+      deferSessionIntroUntilDisclaimerRef.current = false
       queueMicrotask(() => setSessionIntroOpen(true))
     }
   }, [sessionId])
@@ -113,35 +143,37 @@ export default function DashboardPage() {
   }, [sessionId])
 
   useEffect(() => {
-    const storageKey = "route_registration_tool_disclaimer_seen"
-
-    const windowMessage = (window as unknown as Record<string, unknown>)
-      .DISCLAIMER_MESSAGE
-    const envMessage = import.meta.env.VITE_DISCLAIMER_MESSAGE
-    const message = String(windowMessage ?? envMessage ?? "").trim()
-
+    const message = getDisclaimerMessage()
     if (!message) return
     queueMicrotask(() => setDisclaimerMessage(message))
 
     try {
-      const hasSeen = window.localStorage.getItem(storageKey) === "true"
+      const hasSeen = hasDisclaimerBeenSeen()
       if (!hasSeen) queueMicrotask(() => setDisclaimerOpen(true))
     } catch {
-      // If storage access is blocked, still show the disclaimer once.
       queueMicrotask(() => setDisclaimerOpen(true))
     }
   }, [])
 
   const handleDisclaimerClose = () => {
     try {
-      window.localStorage.setItem(
-        "route_registration_tool_disclaimer_seen",
-        "true",
-      )
+      window.localStorage.setItem(DISCLAIMER_STORAGE_KEY, "true")
     } catch {
       // Ignore storage failures; user will see disclaimer again next time.
     }
     setDisclaimerOpen(false)
+
+    if (deferSessionIntroUntilDisclaimerRef.current && sessionId) {
+      deferSessionIntroUntilDisclaimerRef.current = false
+      try {
+        const introKey = `rst_session_intro_seen_${sessionId}`
+        if (window.localStorage.getItem(introKey) !== "true") {
+          queueMicrotask(() => setSessionIntroOpen(true))
+        }
+      } catch {
+        queueMicrotask(() => setSessionIntroOpen(true))
+      }
+    }
   }
 
   const handleSessionIntroClose = () => {
