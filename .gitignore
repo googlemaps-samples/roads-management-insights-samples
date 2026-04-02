@@ -3,5 +3,3 @@
 .venv
 **/.DS_Store
 **/dist
-.cursor/
-.impeccable.md
