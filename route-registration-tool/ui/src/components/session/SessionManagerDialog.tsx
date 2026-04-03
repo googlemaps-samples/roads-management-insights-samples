@@ -14,10 +14,15 @@
 
 import ContentCopyIcon from "@mui/icons-material/ContentCopy"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
+import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined"
 import LinkIcon from "@mui/icons-material/Link"
+import PersonAddOutlinedIcon from "@mui/icons-material/PersonAddOutlined"
+import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined"
 import ShareIcon from "@mui/icons-material/Share"
 import {
   Box,
+  Chip,
+  CircularProgress,
   Divider,
   IconButton,
   InputAdornment,
@@ -29,7 +34,10 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material"
-import { useMemo, useState } from "react"
+import { alpha } from "@mui/material/styles"
+import type { Theme } from "@mui/material/styles"
+import type { ReactNode } from "react"
+import { useCallback, useMemo, useState } from "react"
 
 import { useSessionId } from "../../hooks/use-session-id"
 import { useLinkSession, useLinkedSessions, useUnlinkSession } from "../../hooks/use-api"
@@ -38,6 +46,92 @@ import { isValidUuid } from "../../utils/session"
 import { toast } from "../../utils/toast"
 import Button from "../common/Button"
 import Modal from "../common/Modal"
+
+function sectionShellSx(theme: Theme) {
+  return {
+    p: 2,
+    borderRadius: "12px",
+    border: `1px solid ${theme.palette.divider}`,
+    bgcolor:
+      theme.palette.mode === "light"
+        ? alpha(theme.palette.primary.main, 0.04)
+        : alpha(theme.palette.common.white, 0.06),
+  } as const
+}
+
+function SectionHeader({
+  icon,
+  title,
+  action,
+}: {
+  icon: ReactNode
+  title: string
+  action?: ReactNode
+}) {
+  return (
+    <Stack
+      direction="row"
+      alignItems="center"
+      justifyContent="space-between"
+      spacing={1}
+      sx={{ mb: 1.25 }}
+    >
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
+        <Box
+          sx={{
+            width: 28,
+            height: 28,
+            borderRadius: "8px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            color: "primary.main",
+            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
+          }}
+        >
+          {icon}
+        </Box>
+        <Typography
+          component="span"
+          sx={{
+            fontWeight: 600,
+            fontSize: 13,
+            letterSpacing: "0.01em",
+            color: "text.primary",
+            fontFamily: '"Google Sans", sans-serif',
+          }}
+        >
+          {title}
+        </Typography>
+      </Stack>
+      {action}
+    </Stack>
+  )
+}
+
+const fieldSlotProps = {
+  input: {
+    sx: {
+      fontSize: 12,
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    },
+  },
+} as const
+
+/** Opaque white so fields don’t pick up the section tint behind them. */
+const outlinedInputWhiteSx = {
+  "& .MuiOutlinedInput-root": {
+    borderRadius: "10px",
+    backgroundColor: "#ffffff",
+    "&:hover": { backgroundColor: "#ffffff" },
+    "&.Mui-focused": { backgroundColor: "#ffffff" },
+    "&.Mui-disabled": { backgroundColor: "#ffffff" },
+    "&.MuiInputBase-readOnly": { backgroundColor: "#ffffff" },
+  },
+  "& .MuiInputLabel-root": { fontSize: 11 },
+} as const
 
 export default function SessionManagerDialog({
   open,
@@ -51,6 +145,11 @@ export default function SessionManagerDialog({
   const { data: linkedSessions = [] } = useLinkedSessions(sessionId)
   const linkSessionMutation = useLinkSession()
   const unlinkSessionMutation = useUnlinkSession()
+
+  const handleClose = useCallback(() => {
+    setLinkInput("")
+    onClose()
+  }, [onClose])
 
   const linkedSet = useMemo(() => {
     return new Set(linkedSessions.map((s) => s.toLowerCase()))
@@ -75,89 +174,114 @@ export default function SessionManagerDialog({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       maxWidth="sm"
+      PaperProps={{
+        sx: {
+          borderRadius: "12px",
+          overflow: "hidden",
+        },
+      }}
       title={
-        <Typography
-          component="div"
-          sx={{
-            fontSize: 18,
-            fontFamily: '"Google Sans", sans-serif',
-            fontWeight: 500,
-            color: "#202124",
-            lineHeight: "24px",
-            letterSpacing: "0",
-          }}
-        >
-          Share session
-        </Typography>
+        <Stack direction="row" alignItems="center" spacing={1.5}>
+          <Box
+            sx={{
+              width: 38,
+              height: 38,
+              borderRadius: "10px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              color: "primary.main",
+              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
+            }}
+          >
+            <ShareIcon sx={{ fontSize: 20 }} />
+          </Box>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              component="div"
+              sx={{
+                fontSize: 18,
+                fontFamily: '"Google Sans", sans-serif',
+                fontWeight: 500,
+                color: "#202124",
+                lineHeight: 1.3,
+                letterSpacing: "0",
+              }}
+            >
+              Share projects
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ color: "text.secondary", fontSize: 12, mt: 0.25, lineHeight: 1.4 }}
+            >
+              Your link and user ID for this project list
+            </Typography>
+          </Box>
+        </Stack>
       }
+      titleSx={{ paddingBottom: "8px" }}
       contentSx={{
-        // Prevent the dialog actions from being clipped on shorter viewports.
-        // Allow the content area to scroll if needed.
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
         overflowY: "auto",
-        paddingTop: "12px",
-        paddingBottom: "12px",
+        paddingTop: "8px",
+        paddingBottom: "16px",
       }}
-      actionsSx={{ paddingTop: "8px", paddingBottom: "16px" }}
+      actionsSx={{
+        paddingTop: "8px",
+        paddingBottom: "24px",
+        borderTop: "none",
+      }}
       actions={
-        <div className="flex gap-2">
-          <Button variant="contained" onClick={onClose}>
-            Done
-          </Button>
-        </div>
+        <Button
+          variant="contained"
+          onClick={handleClose}
+          sx={{ minWidth: 88, fontSize: "0.8125rem" }}
+        >
+          Done
+        </Button>
       }
     >
-      <Stack spacing={2.25} sx={{ minHeight: 0, flex: 1 }}>
+      <Stack spacing={2} sx={{ minHeight: 0, flex: 1 }}>
         <Typography
-          variant="body1"
+          variant="body2"
           sx={{
-            lineHeight: 1.55,
-            color: "text.primary",
-            letterSpacing: "0.1px",
+            lineHeight: 1.5,
+            color: "text.secondary",
+            fontSize: 12,
           }}
         >
-          Share this workspace with a link, or link another session to view its projects here.
+          Share your project list with a link, or add another user so their
+          projects appear here.
         </Typography>
 
-        <Stack spacing={1}>
-          <Typography
-            variant="subtitle2"
-            sx={{
-              fontWeight: 700,
-              color: "text.primary",
-              letterSpacing: "0.15px",
-              fontSize: 13,
-            }}
-          >
-            Your session
-          </Typography>
-
-          <Stack spacing={1}>
+        <Box sx={(theme) => ({ ...sectionShellSx(theme) })}>
+          <SectionHeader
+            icon={<PersonOutlinedIcon sx={{ fontSize: 16 }} />}
+            title="You"
+          />
+          <Stack spacing={1.25}>
             <TextField
-              label="Session ID"
+              label="User ID"
               value={sessionId ?? ""}
-              placeholder="No active session"
+              placeholder="No active link"
               fullWidth
               size="small"
+              slotProps={fieldSlotProps}
               InputProps={{
                 readOnly: true,
-                sx: {
-                  fontSize: 13,
-                  fontFamily:
-                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                },
                 endAdornment: (
                   <InputAdornment position="end">
-                    <Tooltip title="Copy session ID" arrow>
+                    <Tooltip title="Copy user ID" arrow>
                       <span>
                         <IconButton
                           size="small"
                           disabled={!sessionId}
-                          aria-label="Copy session ID"
+                          aria-label="Copy user ID"
                           onClick={() => {
                             if (!sessionId) return
                             void copyToClipboard(sessionId)
@@ -175,32 +299,30 @@ export default function SessionManagerDialog({
                   </InputAdornment>
                 ),
               }}
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: 12 },
-              }}
+              sx={outlinedInputWhiteSx}
             />
 
             <TextField
-              label="Dashboard link"
+              label="Projects link"
               value={dashboardLink}
-              placeholder="No active session"
+              placeholder="No active link"
               fullWidth
               size="small"
               InputProps={{
                 readOnly: true,
                 startAdornment: (
                   <InputAdornment position="start">
-                    <LinkIcon fontSize="small" style={{ opacity: 0.7 }} />
+                    <LinkIcon fontSize="small" sx={{ opacity: 0.65, color: "text.secondary" }} />
                   </InputAdornment>
                 ),
                 endAdornment: (
                   <InputAdornment position="end">
-                    <Tooltip title="Copy dashboard link" arrow>
+                    <Tooltip title="Copy projects link" arrow>
                       <span>
                         <IconButton
                           size="small"
                           disabled={!dashboardLink}
-                          aria-label="Copy dashboard link"
+                          aria-label="Copy projects link"
                           onClick={() => {
                             if (!dashboardLink) return
                             void copyToClipboard(dashboardLink)
@@ -211,7 +333,7 @@ export default function SessionManagerDialog({
                             "&:hover": { backgroundColor: "action.hover" },
                           }}
                         >
-                          <ShareIcon fontSize="inherit" />
+                          <ContentCopyIcon fontSize="inherit" />
                         </IconButton>
                       </span>
                     </Tooltip>
@@ -219,40 +341,52 @@ export default function SessionManagerDialog({
                 ),
               }}
               sx={{
-                "& .MuiInputLabel-root": { fontSize: 12 },
+                ...outlinedInputWhiteSx,
                 "& .MuiInputBase-input": {
-                  fontSize: 13,
+                  fontSize: 12,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
                 },
               }}
             />
           </Stack>
-        </Stack>
+        </Box>
 
-        <Box>
-          <Stack direction="row" alignItems="baseline" justifyContent="space-between" spacing={2}>
-            <Typography
-              variant="subtitle2"
-              sx={{
-                fontWeight: 700,
-                color: "text.primary",
-                letterSpacing: "0.15px",
-                fontSize: 13,
-              }}
-            >
-              Link another session
-            </Typography>
-            <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              {linkedSessions.length} linked
-            </Typography>
-          </Stack>
-          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.75, lineHeight: 1.55 }}>
-            Paste a session ID. The other person needs to open their session link at least once.
+        <Box sx={(theme) => ({ ...sectionShellSx(theme) })}>
+          <SectionHeader
+            icon={<PersonAddOutlinedIcon sx={{ fontSize: 16 }} />}
+            title="Link another user"
+            action={
+              <Chip
+                size="small"
+                label={`${linkedSessions.length} linked`}
+                variant="outlined"
+                sx={{
+                  height: 24,
+                  fontSize: "0.6875rem",
+                  fontWeight: 600,
+                  borderColor: "divider",
+                  bgcolor: "background.paper",
+                }}
+              />
+            }
+          />
+          <Typography
+            variant="body2"
+            sx={{ color: "text.secondary", mb: 1.5, lineHeight: 1.5, fontSize: 12 }}
+          >
+            Paste their user ID. They need to open their projects link at least
+            once before you can link.
           </Typography>
 
-          <Stack direction="row" spacing={1.5} sx={{ mt: 2 }} alignItems="flex-start">
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.25}
+            alignItems={{ xs: "stretch", sm: "flex-start" }}
+          >
             <TextField
               value={linkInput}
               onChange={(e) => {
@@ -261,108 +395,128 @@ export default function SessionManagerDialog({
               fullWidth
               size="small"
               placeholder="3f2504e0-4f89-11d3-9a0c-0305e82c3301"
-              label="Session ID"
+              label="User ID"
               inputProps={{
-                "aria-label": "Session ID to link",
+                "aria-label": "User ID to link",
                 spellCheck: false,
               }}
+              slotProps={fieldSlotProps}
               InputProps={{
-                sx: {
-                  fontSize: 13,
-                  fontFamily:
-                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                },
                 startAdornment: (
                   <InputAdornment position="start">
-                    <LinkIcon fontSize="small" style={{ opacity: 0.7 }} />
+                    <LinkIcon fontSize="small" sx={{ opacity: 0.65, color: "text.secondary" }} />
                   </InputAdornment>
                 ),
               }}
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: 12 },
-                "& .MuiFormHelperText-root": { fontSize: 11, marginTop: "4px" },
-              }}
+              sx={outlinedInputWhiteSx}
             />
 
             <Button
               variant="contained"
               disabled={!sessionId || !linkInputTrimmed || linkSessionMutation.isPending}
-              sx={{ minWidth: 120, height: 40, whiteSpace: "nowrap" }}
+              sx={{
+                minWidth: { xs: "100%", sm: 118 },
+                height: 36,
+                fontSize: "0.8125rem",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                borderRadius: "10px",
+              }}
               onClick={async () => {
                 const other = linkInputTrimmed
                 if (!isValidUuid(other)) {
-                  const msg = "Please enter a valid session ID (UUID)."
+                  const msg = "Please enter a valid user ID (UUID)."
                   toast.error(msg)
                   return
                 }
                 if (sessionId && other.toLowerCase() === sessionId.toLowerCase()) {
-                  const msg = "You can’t link a session to itself."
+                  const msg = "You can’t link to your own user ID."
                   toast.error(msg)
                   return
                 }
                 if (linkedSet.has(other.toLowerCase())) {
-                  const msg = "That session is already linked."
+                  const msg = "That user is already linked."
                   toast.info(msg, { duration: 2500 })
                   return
                 }
 
                 try {
                   await linkSessionMutation.mutateAsync(other)
-                  toast.success("Session linked", { duration: 2000 })
+                  toast.success("User linked", { duration: 2000 })
                   setLinkInput("")
                 } catch (e) {
-                  let msg = e instanceof Error ? e.message : "Failed to link session"
-                  if (msg === "Session not found.") {
+                  let msg = e instanceof Error ? e.message : "Failed to link user"
+                  if (msg === "Session not found." || msg === "Session not found") {
                     msg =
-                      "Session not found. Ask the other person to open their session link first."
-                  } else if (msg === "Session already linked.") {
-                    msg = "That session is already linked."
+                      "User not found. Ask the other person to open their projects link first."
+                  } else if (
+                    msg === "Session already linked." ||
+                    msg === "Session already linked"
+                  ) {
+                    msg = "That user is already linked."
                   }
                   toast.error(msg)
                 }
               }}
             >
-              Link session
+              {linkSessionMutation.isPending ? (
+                <Stack direction="row" alignItems="center" spacing={0.75} sx={{ py: 0.125 }}>
+                  <CircularProgress size={16} thickness={4} sx={{ color: "inherit" }} />
+                  <span>Linking…</span>
+                </Stack>
+              ) : (
+                "Link user"
+              )}
             </Button>
           </Stack>
         </Box>
 
-        {linkedSessions.length > 0 && (
-          <Box sx={{ minHeight: 0 }}>
-            <Divider />
-            <Stack
-              direction="row"
-              alignItems="baseline"
-              justifyContent="space-between"
-              spacing={2}
-              sx={{ mt: 2 }}
-            >
-              <Typography
-                variant="subtitle2"
+        <Box sx={(theme) => ({ ...sectionShellSx(theme) })}>
+          <SectionHeader
+            icon={<GroupsOutlinedIcon sx={{ fontSize: 16 }} />}
+            title="Linked users"
+            action={
+              <Chip
+                size="small"
+                label={`${linkedSessions.length} total`}
+                variant="outlined"
                 sx={{
-                  fontWeight: 700,
-                  color: "text.primary",
-                  letterSpacing: "0.15px",
-                  fontSize: 13,
+                  height: 24,
+                  fontSize: "0.6875rem",
+                  fontWeight: 600,
+                  borderColor: "divider",
+                  bgcolor: "background.paper",
                 }}
-              >
-                Linked sessions
-              </Typography>
-              <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                {linkedSessions.length} total
-              </Typography>
-            </Stack>
+              />
+            }
+          />
 
+          {linkedSessions.length === 0 ? (
+            <Box
+              sx={{
+                py: 2.5,
+                px: 1.5,
+                textAlign: "center",
+                borderRadius: "10px",
+                border: "1px dashed",
+                borderColor: "divider",
+                bgcolor: (theme) => alpha(theme.palette.action.hover, 0.2),
+              }}
+            >
+              <Typography variant="body2" sx={{ color: "text.secondary", fontSize: 12 }}>
+                No one linked yet. Add a user ID above to see their projects here.
+              </Typography>
+            </Box>
+          ) : (
             <Box
               className="pretty-scrollbar"
               sx={{
-                mt: 1,
                 maxHeight: 220,
                 overflow: "auto",
-                borderRadius: 3,
+                borderRadius: "10px",
                 border: "1px solid",
                 borderColor: "divider",
-                backgroundColor: "background.paper",
+                bgcolor: "background.paper",
               }}
             >
               <List disablePadding>
@@ -371,19 +525,35 @@ export default function SessionManagerDialog({
                     <ListItemButton
                       disableRipple
                       sx={{
-                        px: 1.25,
-                        py: 0.9,
+                        px: 1.5,
+                        py: 1.1,
                         alignItems: "center",
                         "&:hover": { backgroundColor: "action.hover" },
                       }}
                     >
+                      <Box
+                        sx={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: "8px",
+                          flexShrink: 0,
+                          mr: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "primary.main",
+                          bgcolor: (theme) => alpha(theme.palette.primary.main, 0.1),
+                        }}
+                      >
+                        <ShareIcon sx={{ fontSize: 16 }} />
+                      </Box>
                       <ListItemText
                         primary={
                           <Typography
                             variant="body2"
                             sx={{
                               color: "text.primary",
-                              fontSize: 13,
+                              fontSize: 12,
                               fontFamily:
                                 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
                               lineHeight: 1.45,
@@ -394,14 +564,19 @@ export default function SessionManagerDialog({
                             {sid}
                           </Typography>
                         }
-                        sx={{ m: 0, pr: 1.5 }}
+                        secondary="Linked user"
+                        secondaryTypographyProps={{
+                          variant: "caption",
+                          sx: { mt: 0.25, fontSize: "0.65rem", letterSpacing: "0.02em" },
+                        }}
+                        sx={{ m: 0, pr: 1 }}
                       />
 
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <Tooltip title="Copy" arrow>
+                      <Stack direction="row" spacing={0.25} alignItems="center">
+                        <Tooltip title="Copy ID" arrow>
                           <IconButton
                             size="small"
-                            aria-label="Copy linked session ID"
+                            aria-label="Copy linked user ID"
                             onClick={(e) => {
                               e.stopPropagation()
                               void copyToClipboard(sid)
@@ -409,10 +584,10 @@ export default function SessionManagerDialog({
                             sx={{
                               borderRadius: 2,
                               color: "text.secondary",
-                              "&:hover": { backgroundColor: "transparent" },
+                              "&:hover": { backgroundColor: "action.selected" },
                             }}
                           >
-                            <ContentCopyIcon fontSize="inherit" />
+                            <ContentCopyIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                         <Tooltip title="Remove" arrow>
@@ -420,19 +595,21 @@ export default function SessionManagerDialog({
                             <IconButton
                               size="small"
                               disabled={unlinkSessionMutation.isPending}
-                              aria-label="Remove linked session"
+                              aria-label="Remove linked user"
                               onClick={async (e) => {
                                 e.stopPropagation()
                                 await unlinkSessionMutation.mutateAsync(sid)
-                                toast.success("Session unlinked", { duration: 2000 })
+                                toast.success("User unlinked", { duration: 2000 })
                               }}
                               sx={{
                                 borderRadius: 2,
-                                color: "text.secondary",
-                                "&:hover": { backgroundColor: "transparent" },
+                                color: "error.main",
+                                "&:hover": {
+                                  backgroundColor: (theme) => alpha(theme.palette.error.main, 0.08),
+                                },
                               }}
                             >
-                              <DeleteOutlineIcon fontSize="inherit" />
+                              <DeleteOutlineIcon fontSize="small" />
                             </IconButton>
                           </span>
                         </Tooltip>
@@ -443,10 +620,9 @@ export default function SessionManagerDialog({
                 ))}
               </List>
             </Box>
-          </Box>
-        )}
+          )}
+        </Box>
       </Stack>
     </Modal>
   )
 }
-

@@ -317,12 +317,12 @@ export default function Navbar() {
             </>
           )}
 
-          <Tooltip title="Session sharing" arrow>
+          <Tooltip title="Share projects" arrow>
             <span>
               <IconButton
                 onClick={() => setSessionManagerOpen(true)}
                 size="small"
-                aria-label="Session sharing"
+                aria-label="Share projects"
                 disabled={!sessionId}
                 data-tour="session-sharing"
               >

@@ -22,26 +22,11 @@ import ProjectGrid from "../../components/dashboard/ProjectGrid"
 import Main from "../../components/layout/Main"
 import PageLayout from "../../components/layout/PageLayout"
 import { useInfiniteProjects } from "../../hooks/use-api"
-import SessionManagerDialog from "../../components/session/SessionManagerDialog"
 import DashboardTour from "../../components/tour/DashboardTour"
 import { clearAllLayers } from "../../utils/clear-all-layers"
-import { toast } from "../../utils/toast"
-import ContentCopyIcon from "@mui/icons-material/ContentCopy"
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline"
-import LinkIcon from "@mui/icons-material/Link"
-import ShareIcon from "@mui/icons-material/Share"
-import {
-  Box,
-  IconButton,
-  InputAdornment,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
-} from "@mui/material"
-import { alpha } from "@mui/material/styles"
+import { IconButton, Tooltip, Typography } from "@mui/material"
 import { useSessionId } from "../../hooks/use-session-id"
-import { buildSessionPath } from "../../utils/session"
 
 const DISCLAIMER_STORAGE_KEY = "route_registration_tool_disclaimer_seen"
 
@@ -65,11 +50,8 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [disclaimerOpen, setDisclaimerOpen] = useState(false)
   const [disclaimerMessage, setDisclaimerMessage] = useState<string | null>(null)
-  const [sessionIntroOpen, setSessionIntroOpen] = useState(false)
-  const deferSessionIntroUntilDisclaimerRef = useRef(false)
-  const [sessionManagerOpen, setSessionManagerOpen] = useState(false)
+  const deferTourUntilDisclaimerRef = useRef(false)
   const [tourOpen, setTourOpen] = useState(false)
-  const [pendingTourAfterIntro, setPendingTourAfterIntro] = useState(false)
   const [tourStepId, setTourStepId] = useState<string | null>(null)
   const {
     data,
@@ -102,7 +84,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!sessionId) return
-    const key = `rst_session_intro_seen_${sessionId}`
+    const key = `rst_dashboard_tour_seen_${sessionId}`
     try {
       const seen = window.localStorage.getItem(key) === "true"
       if (seen) return
@@ -112,33 +94,14 @@ export default function DashboardPage() {
         disclaimerMsg.length > 0 && !hasDisclaimerBeenSeen()
 
       if (disclaimerMustShowFirst) {
-        deferSessionIntroUntilDisclaimerRef.current = true
+        deferTourUntilDisclaimerRef.current = true
         return
       }
-      deferSessionIntroUntilDisclaimerRef.current = false
-      queueMicrotask(() => setSessionIntroOpen(true))
+      deferTourUntilDisclaimerRef.current = false
+      queueMicrotask(() => setTourOpen(true))
     } catch {
-      deferSessionIntroUntilDisclaimerRef.current = false
-      queueMicrotask(() => setSessionIntroOpen(true))
-    }
-  }, [sessionId])
-
-  useEffect(() => {
-    if (!sessionId) return
-    const key = `rst_dashboard_tour_seen_${sessionId}`
-    try {
-      const seen = window.localStorage.getItem(key) === "true"
-      if (!seen) {
-        // Avoid stacking dialogs on first load by keying off intro "seen" state
-        // (not the React state, which may not be set yet due to effect timing).
-        const introSeen =
-          window.localStorage.getItem(`rst_session_intro_seen_${sessionId}`) ===
-          "true"
-        if (!introSeen) queueMicrotask(() => setPendingTourAfterIntro(true))
-        else queueMicrotask(() => setTourOpen(true))
-      }
-    } catch {
-      queueMicrotask(() => setPendingTourAfterIntro(true))
+      deferTourUntilDisclaimerRef.current = false
+      queueMicrotask(() => setTourOpen(true))
     }
   }, [sessionId])
 
@@ -163,32 +126,16 @@ export default function DashboardPage() {
     }
     setDisclaimerOpen(false)
 
-    if (deferSessionIntroUntilDisclaimerRef.current && sessionId) {
-      deferSessionIntroUntilDisclaimerRef.current = false
+    if (deferTourUntilDisclaimerRef.current && sessionId) {
+      deferTourUntilDisclaimerRef.current = false
       try {
-        const introKey = `rst_session_intro_seen_${sessionId}`
-        if (window.localStorage.getItem(introKey) !== "true") {
-          queueMicrotask(() => setSessionIntroOpen(true))
+        const tourKey = `rst_dashboard_tour_seen_${sessionId}`
+        if (window.localStorage.getItem(tourKey) !== "true") {
+          queueMicrotask(() => setTourOpen(true))
         }
       } catch {
-        queueMicrotask(() => setSessionIntroOpen(true))
+        queueMicrotask(() => setTourOpen(true))
       }
-    }
-  }
-
-  const handleSessionIntroClose = () => {
-    if (sessionId) {
-      try {
-        window.localStorage.setItem(`rst_session_intro_seen_${sessionId}`, "true")
-      } catch {
-        // ignore
-      }
-    }
-    setSessionIntroOpen(false)
-
-    if (pendingTourAfterIntro) {
-      setPendingTourAfterIntro(false)
-      queueMicrotask(() => setTourOpen(true))
     }
   }
 
@@ -201,20 +148,6 @@ export default function DashboardPage() {
       }
     }
     setTourOpen(false)
-  }
-
-  const dashboardLink =
-    sessionId && typeof window !== "undefined"
-      ? `${window.location.origin}${buildSessionPath(sessionId, "/dashboard")}`
-      : ""
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success("Copied to clipboard", { duration: 1500 })
-    } catch {
-      toast.error("Failed to copy", { duration: 2500 })
-    }
   }
 
   if (error) {
@@ -235,240 +168,6 @@ export default function DashboardPage() {
   return (
     <PageLayout>
       <Main>
-        {sessionId && (
-          <Modal
-            open={sessionIntroOpen}
-            onClose={handleSessionIntroClose}
-            maxWidth="sm"
-            title={
-              <Typography
-                component="div"
-                sx={{
-                  fontSize: 18,
-                  fontFamily: '"Google Sans", sans-serif',
-                  fontWeight: 500,
-                  color: "#202124",
-                  lineHeight: "24px",
-                  letterSpacing: "0",
-                }}
-              >
-                Your session workspace
-              </Typography>
-            }
-            titleSx={{ paddingBottom: "4px" }}
-            contentSx={{
-              display: "flex",
-              flexDirection: "column",
-              minHeight: 0,
-              overflowY: "auto",
-              paddingTop: "16px",
-              paddingBottom: "8px",
-            }}
-            actionsSx={{ paddingTop: "4px", paddingBottom: "16px" }}
-            actions={
-              <div className="flex gap-2">
-                <Button variant="contained" onClick={handleSessionIntroClose}>
-                  Got it
-                </Button>
-              </div>
-            }
-          >
-            <Stack spacing={3} sx={{ minHeight: 0, flex: 1 }}>
-              <Typography
-                variant="body1"
-                sx={{
-                  lineHeight: 1.55,
-                  color: "text.primary",
-                  letterSpacing: "0.1px",
-                }}
-              >
-                This dashboard is tied to a session link. Anyone with the link can
-                access it (link-based sharing).
-              </Typography>
-
-              <Stack spacing={1.75}>
-                <Typography
-                  variant="subtitle2"
-                  sx={{
-                    fontWeight: 700,
-                    color: "text.primary",
-                    letterSpacing: "0.15px",
-                    fontSize: 13,
-                    display: "block",
-                    mb: 0.25,
-                  }}
-                >
-                  Your session
-                </Typography>
-
-                <Stack spacing={1.75}>
-                  <TextField
-                    label="Session ID"
-                    value={sessionId}
-                    fullWidth
-                    size="small"
-                    InputProps={{
-                      readOnly: true,
-                      sx: {
-                        fontSize: 13,
-                        fontFamily:
-                          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                      },
-                      endAdornment: (
-                        <InputAdornment position="end">
-                          <Tooltip title="Copy session ID" arrow>
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Copy session ID"
-                                onClick={() => void copyToClipboard(sessionId)}
-                                sx={{
-                                  borderRadius: 2,
-                                  color: "text.secondary",
-                                  "&:hover": { backgroundColor: "action.hover" },
-                                }}
-                              >
-                                <ContentCopyIcon fontSize="inherit" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </InputAdornment>
-                      ),
-                    }}
-                    sx={{
-                      "& .MuiInputLabel-root": { fontSize: 12 },
-                    }}
-                  />
-
-                  <TextField
-                    label="Dashboard link"
-                    value={dashboardLink}
-                    fullWidth
-                    size="small"
-                    InputProps={{
-                      readOnly: true,
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <LinkIcon fontSize="small" style={{ opacity: 0.7 }} />
-                        </InputAdornment>
-                      ),
-                      endAdornment: (
-                        <InputAdornment position="end">
-                          <Tooltip title="Copy dashboard link" arrow>
-                            <span>
-                              <IconButton
-                                size="small"
-                                disabled={!dashboardLink}
-                                aria-label="Copy dashboard link"
-                                onClick={() => {
-                                  if (!dashboardLink) return
-                                  void copyToClipboard(dashboardLink)
-                                }}
-                                sx={{
-                                  borderRadius: 2,
-                                  color: "text.secondary",
-                                  "&:hover": { backgroundColor: "action.hover" },
-                                }}
-                              >
-                                <ShareIcon fontSize="inherit" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </InputAdornment>
-                      ),
-                    }}
-                    sx={{
-                      "& .MuiInputLabel-root": { fontSize: 12 },
-                      "& .MuiInputBase-input": {
-                        fontSize: 13,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      },
-                    }}
-                  />
-                </Stack>
-              </Stack>
-
-              <Box
-                sx={(theme) => {
-                  const br = theme.shape.borderRadius
-                  return {
-                  borderRadius:
-                    typeof br === "number" ? `${br}px` : br,
-                  border: `1px solid ${alpha(theme.palette.text.primary, 0.23)}`,
-                  backgroundColor: theme.palette.background.paper,
-                  px: 1.75,
-                  py: 1.5,
-                  transition: theme.transitions.create(["border-color"], {
-                    duration: theme.transitions.duration.shorter,
-                  }),
-                  "@media (hover: hover)": {
-                    "&:hover": {
-                      borderColor: alpha(theme.palette.text.primary, 0.87),
-                    },
-                  },
-                }
-                }}
-              >
-                <Stack spacing={1}>
-                  <Typography
-                    variant="subtitle2"
-                    sx={{
-                      fontWeight: 700,
-                      color: "text.primary",
-                      letterSpacing: "0.15px",
-                      fontSize: 13,
-                    }}
-                  >
-                    Link another session
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      color: "text.secondary",
-                      lineHeight: 1.55,
-                      fontSize: 13,
-                    }}
-                  >
-                    View projects from another session in this workspace. The other
-                    person must open their session link at least once.
-                  </Typography>
-                  <Button
-                    variant="text"
-                    onClick={() => setSessionManagerOpen(true)}
-                    startIcon={
-                      <LinkIcon sx={{ fontSize: 18, opacity: 0.85 }} />
-                    }
-                    sx={{
-                      alignSelf: "flex-start",
-                      mt: 0.25,
-                      ml: -1,
-                      minHeight: 36,
-                      py: 0.5,
-                      px: 1,
-                      fontSize: 13,
-                      fontWeight: 500,
-                      textTransform: "none",
-                      color: "primary.main",
-                      "& .MuiButton-startIcon": { mr: 0.75 },
-                    }}
-                  >
-                    Manage session sharing
-                  </Button>
-                </Stack>
-              </Box>
-            </Stack>
-          </Modal>
-        )}
-
-        {sessionId && (
-          <SessionManagerDialog
-            open={sessionManagerOpen}
-            onClose={() => setSessionManagerOpen(false)}
-          />
-        )}
-
         <DashboardTour
           open={tourOpen}
           onClose={handleTourClose}

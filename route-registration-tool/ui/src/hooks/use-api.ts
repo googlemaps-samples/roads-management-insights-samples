@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 import {
   useInfiniteQuery,
   useMutation,
@@ -52,7 +51,8 @@ import { useSessionId } from "./use-session-id"
 export const queryKeys = {
   projects: ["projects"] as const,
   project: (id: string) => ["projects", id] as const,
-  linkedSessions: (sessionId: string) => ["sessions", sessionId, "linked"] as const,
+  linkedSessions: (sessionId: string) =>
+    ["sessions", sessionId, "linked"] as const,
   gcpProjects: ["gcpProjects"] as const,
   routes: (projectId: string) => ["routes", projectId] as const,
   route: (id: string) => ["route", id] as const,
@@ -76,7 +76,9 @@ export const queryKeys = {
 
 export const useLinkedSessions = (sessionId: string | null) => {
   return useQuery({
-    queryKey: sessionId ? queryKeys.linkedSessions(sessionId) : ["sessions", "none"],
+    queryKey: sessionId
+      ? queryKeys.linkedSessions(sessionId)
+      : ["sessions", "none"],
     queryFn: async () => {
       if (!sessionId) throw new Error("sessionId is required")
       // Ensure exists (best-effort), then fetch links.
@@ -104,7 +106,9 @@ export const useLinkSession = () => {
     },
     onSuccess: () => {
       if (sessionId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.linkedSessions(sessionId) })
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.linkedSessions(sessionId),
+        })
         queryClient.invalidateQueries({ queryKey: ["projects-infinite"] })
       }
     },
@@ -123,7 +127,9 @@ export const useUnlinkSession = () => {
     },
     onSuccess: () => {
       if (sessionId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.linkedSessions(sessionId) })
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.linkedSessions(sessionId),
+        })
         queryClient.invalidateQueries({ queryKey: ["projects-infinite"] })
       }
     },

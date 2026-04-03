@@ -317,7 +317,7 @@ const DynamicIsland: React.FC = () => {
           shortDescription:
             "Click 'Add Routes' to upload routes, draw a new route, or import roads from an area.",
           description:
-            "Welcome to your project workspace. Click the 'Add Routes' button to see options: From File (GeoJSON) (for GeoJSON files), Draw Route (to manually draw on the map), or Import Roads (to select an area and import all roads within it).",
+            "Welcome to your project. Click the 'Add Routes' button to see options: From File (GeoJSON) (for GeoJSON files), Draw Route (to manually draw on the map), or Import Roads (to select an area and import all roads within it).",
           multiLineDescription: [
             "Click **Add Routes** to get started - choose: **From File (GeoJSON)**, **Draw Route**, or **Import Roads**",
           ],

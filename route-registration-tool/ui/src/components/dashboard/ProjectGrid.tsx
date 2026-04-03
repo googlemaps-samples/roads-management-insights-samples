@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Add, Delete, Edit, HubOutlined, Search, UploadFile } from "@mui/icons-material"
+import { Add, Delete, Edit, Search, Share, UploadFile } from "@mui/icons-material"
 import {
   Box,
   Card,
   CardActionArea,
   CardContent,
-  Chip,
   Fade,
   IconButton,
   Skeleton,
@@ -35,6 +34,7 @@ import { noSnapshotFallback } from "../../assets/images"
 import {
   PRIMARY_BLUE,
   PRIMARY_BLUE_DARK,
+  PRIMARY_BLUE_LIGHT,
   PRIMARY_RED_GOOGLE,
   PRIMARY_RED_HOVER_BG,
 } from "../../constants/colors"
@@ -234,8 +234,21 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
         },
       }}
     >
-      {/* Action Buttons - appear on hover */}
-      <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Action buttons: always visible on touch; fade in on hover for fine pointers */}
+      <Box
+        className="absolute top-2 right-2 z-20 flex gap-1 transition-opacity"
+        sx={{
+          opacity: 1,
+          "@media (hover: hover) and (pointer: fine)": {
+            opacity: 0,
+          },
+          ".group:hover &": {
+            "@media (hover: hover) and (pointer: fine)": {
+              opacity: 1,
+            },
+          },
+        }}
+      >
         {/* Edit Button */}
         <IconButton
           onClick={onRename}
@@ -246,8 +259,12 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
             boxShadow:
               "0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24)",
             borderRadius: "50%",
-            width: "32px",
-            height: "32px",
+            width: "36px",
+            height: "36px",
+            "@media (pointer: coarse)": {
+              width: 44,
+              height: 44,
+            },
             "&:hover": {
               backgroundColor: "rgba(9, 87, 208, 0.08)",
               boxShadow:
@@ -276,8 +293,12 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
             boxShadow:
               "0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24)",
             borderRadius: "50%",
-            width: "32px",
-            height: "32px",
+            width: "36px",
+            height: "36px",
+            "@media (pointer: coarse)": {
+              width: 44,
+              height: 44,
+            },
             "&:hover": {
               backgroundColor: PRIMARY_RED_HOVER_BG,
               boxShadow:
@@ -295,7 +316,7 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
         >
           <Delete />
         </IconButton>
-      </div>
+      </Box>
 
       <CardActionArea
         onClick={onClick}
@@ -340,8 +361,8 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
                     component="span"
                     sx={{ display: "block", mb: 0.75, lineHeight: 1.4 }}
                   >
-                    Created in a session you linked to this workspace. You can
-                    open and use it like your own projects.
+                    Created by another user you linked. You can open and use it
+                    like your own projects.
                   </Typography>
                   <Typography
                     variant="caption"
@@ -362,6 +383,7 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
             >
               <Box
                 component="span"
+                aria-label="Project from a linked user"
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") e.stopPropagation()
@@ -372,50 +394,27 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
                   left: 8,
                   zIndex: 12,
                   display: "inline-flex",
-                  maxWidth: "calc(100% - 88px)",
-                  borderRadius: "13px",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 28,
+                  height: 28,
+                  borderRadius: "14px",
                   cursor: "default",
-                  "&:hover .MuiChip-root": {
-                    backgroundColor: PRIMARY_BLUE_DARK,
-                  },
-                  "&:hover .MuiChip-label, &:hover .MuiChip-icon": {
-                    color: "#ffffff",
+                  backgroundColor: "#ffffff",
+                  border: `1px solid ${alpha(PRIMARY_BLUE, 0.35)}`,
+                  boxShadow:
+                    "0 1px 2px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06)",
+                  transition: "background-color 0.15s ease, border-color 0.15s ease",
+                  "&:hover": {
+                    backgroundColor: PRIMARY_BLUE_LIGHT,
+                    borderColor: alpha(PRIMARY_BLUE, 0.45),
                   },
                 }}
               >
-                <Chip
-                  clickable={false}
-                  icon={
-                    <HubOutlined
-                      sx={{
-                        fontSize: "14px !important",
-                        ml: "4px !important",
-                        color: `${alpha("#ffffff", 0.95)} !important`,
-                      }}
-                    />
-                  }
-                  label="Linked session"
-                  size="small"
+                <Share
                   sx={{
-                    height: 26,
-                    fontSize: "0.6875rem",
-                    fontWeight: 600,
-                    letterSpacing: "0.01em",
-                    maxWidth: "100%",
-                    backgroundColor: PRIMARY_BLUE,
-                    color: "#ffffff",
-                    border: "none",
-                    boxShadow:
-                      "0 1px 2px rgba(9, 87, 208, 0.45), 0 1px 3px rgba(0, 0, 0, 0.12)",
-                    "& .MuiChip-icon": {
-                      color: `${alpha("#ffffff", 0.95)} !important`,
-                    },
-                    "& .MuiChip-label": {
-                      px: 0.75,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      color: "#ffffff",
-                    },
+                    fontSize: 16,
+                    color: PRIMARY_BLUE,
                   }}
                 />
               </Box>
@@ -497,7 +496,7 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
               </span>
             </div>
             {project.sessionId ? (
-              <Tooltip title={`Session ID: ${project.sessionId}`} arrow>
+              <Tooltip title={`User ID: ${project.sessionId}`} arrow>
                 <Typography
                   variant="caption"
                   component="div"
@@ -513,7 +512,7 @@ const ProjectCardItem: React.FC<ProjectCardItemProps> = ({
                     cursor: "default",
                   }}
                 >
-                  Session {truncateSessionIdForCard(project.sessionId)}
+                  User {truncateSessionIdForCard(project.sessionId)}
                 </Typography>
               </Tooltip>
             ) : null}
@@ -721,11 +720,12 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
 
   return (
     <div
-      className="absolute left-1/2 -translate-x-1/2 w-full max-w-[95vw] sm:max-w-[90vw] md:max-w-[85vw] lg:max-w-[95vw] xl:max-w-[90rem] px-2 sm:px-4 z-10"
+      className="absolute left-1/2 -translate-x-1/2 w-full max-w-[100vw] min-[400px]:max-w-[95vw] sm:max-w-[90vw] md:max-w-[85vw] lg:max-w-[95vw] xl:max-w-[90rem] px-2 sm:px-4 z-10 box-border"
       style={{
-        top: "calc(64px + 32px)",
-        bottom: "32px",
-        maxHeight: "calc(100vh - 64px - 64px)",
+        top: "max(calc(64px + 1rem), calc(64px + env(safe-area-inset-top, 0px) + 0.75rem))",
+        bottom: "max(1rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem))",
+        maxHeight:
+          "calc(100vh - 64px - max(2rem, env(safe-area-inset-bottom, 0px) + 1rem) - env(safe-area-inset-top, 0px))",
       }}
     >
       <Fade in timeout={600}>
@@ -733,6 +733,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
           elevation={10}
           sx={{
             padding: 0,
+            height: "100%",
             maxHeight: "100%",
             display: "flex",
             flexDirection: "column",
@@ -747,12 +748,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
           }}
           className="bg-[#f8f9fa] backdrop-blur-[16px] rounded-[24px] overflow-hidden"
         >
-          <CardContent
-            className={`pb-0 flex-1 min-h-0 ${projects.length === 0 && !isLoading
-              ? "overflow-y-auto pretty-scrollbar"
-              : "overflow-hidden"
-              }`}
-          >
+          <CardContent className="pb-0 flex-1 min-h-0 overflow-hidden">
             <div className="flex flex-col h-full min-h-0">
               {/* Header Card with Buttons */}
               <div className="flex-shrink-0">
@@ -768,7 +764,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                   }}
                   className="overflow-hidden"
                 >
-                  <div className="px-5 py-4">
+                  <div className="px-3 py-3 sm:px-5 sm:py-4">
                     <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
                       <div className="flex-1 min-w-0">
                         <Typography
@@ -856,15 +852,10 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                 </Card>
               </div>
 
-              {/* Projects Grid Section */}
+              {/* Projects Grid Section — flex fills space below header (avoids brittle vh math on small screens) */}
               <div
-                className="min-w-0 px-5 py-4 flex flex-col"
+                className="min-w-0 px-3 py-3 sm:px-5 sm:py-4 flex flex-col flex-1 min-h-0"
                 data-tour="project-grid"
-                style={{
-                  height: "calc(100vh - 300px)",
-                  minHeight: "400px",
-                  maxHeight: "calc(100vh - 300px)",
-                }}
               >
                 <div className="mb-4 flex-shrink-0">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 pb-4 border-b border-gray-200">
@@ -928,7 +919,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                 </div>
 
                 {effectiveIsLoading ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-3 sm:gap-x-4 gap-y-6 sm:gap-y-8 overflow-y-auto pretty-scrollbar items-start flex-1 min-h-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-3 sm:gap-x-4 gap-y-5 sm:gap-y-6 md:gap-y-8 overflow-y-auto pretty-scrollbar items-start flex-1 min-h-0">
                     {[...Array(6)].map((_, index) => (
                       <div
                         key={`skeleton-${index}`}
@@ -939,25 +930,8 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                     ))}
                   </div>
                 ) : projects.length === 0 ? (
-                  <div className="flex items-center justify-center py-6 sm:py-8 md:py-12 lg:py-16 h-full">
-                    <div className="text-center max-w-md px-2 sm:px-4 w-full">
-                      <div className="mb-4 sm:mb-6 flex justify-center">
-                        <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-                          <Add
-                            sx={{
-                              fontSize: "36px",
-                              "@media (min-width: 640px)": {
-                                fontSize: "42px",
-                              },
-                              "@media (min-width: 768px)": {
-                                fontSize: "48px",
-                              },
-                              color: PRIMARY_BLUE,
-                              opacity: 0.8,
-                            }}
-                          />
-                        </div>
-                      </div>
+                  <div className="flex flex-1 min-h-0 flex-col items-center justify-center py-3 sm:py-6 md:py-10 overflow-hidden">
+                    <div className="text-center max-w-md px-2 sm:px-4 w-full min-h-0 shrink">
                       <Typography
                         variant="h6"
                         className="font-semibold text-gray-900 mb-2 text-base sm:text-lg md:text-xl"
@@ -966,7 +940,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                       </Typography>
                       <Typography
                         variant="body2"
-                        className="text-gray-500 mb-6 sm:mb-8 text-xs sm:text-sm md:text-base px-2"
+                        className="text-gray-500 mb-4 sm:mb-6 text-xs sm:text-sm md:text-base px-2"
                       >
                         Get started by creating your first project to select and
                         manage roads for your jurisdiction.
@@ -975,6 +949,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                         onClick={handleAddProjectClick}
                         variant="contained"
                         startIcon={<Add />}
+                        data-tour="add-project-empty"
                         sx={{
                           backgroundColor: "#1967D2",
                           color: "#ffffff",
@@ -982,8 +957,18 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                           fontSize: "14px",
                           fontWeight: 500,
                           padding: "10px 24px",
+                          width: "100%",
+                          maxWidth: "320px",
+                          mx: "auto",
+                          display: "block",
                           boxShadow:
                             "0 1px 3px rgba(25, 103, 210, 0.4), 0 1px 2px rgba(25, 103, 210, 0.3)",
+                          "@media (min-width: 600px)": {
+                            width: "auto",
+                            maxWidth: "none",
+                            mx: 0,
+                            display: "inline-flex",
+                          },
                           "&:hover": {
                             backgroundColor: "#1557B0",
                             boxShadow:
@@ -997,9 +982,9 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                     </div>
                   </div>
                 ) : filteredProjects.length === 0 && searchQuery.trim() ? (
-                  <div className="flex items-center justify-center py-6 sm:py-8 md:py-12 lg:py-16 h-full">
-                    <div className="text-center max-w-md px-2 sm:px-4 w-full">
-                      <div className="mb-4 sm:mb-6 flex justify-center">
+                  <div className="flex flex-1 min-h-0 flex-col items-center justify-center py-3 sm:py-6 md:py-10 overflow-hidden">
+                    <div className="text-center max-w-md px-2 sm:px-4 w-full min-h-0 shrink">
+                      <div className="mb-3 sm:mb-5 flex justify-center">
                         <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
                           <Search
                             sx={{
@@ -1024,7 +1009,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                       </Typography>
                       <Typography
                         variant="body2"
-                        className="text-gray-500 mb-6 sm:mb-8 text-xs sm:text-sm md:text-base px-2"
+                        className="text-gray-500 mb-4 sm:mb-6 text-xs sm:text-sm md:text-base px-2"
                       >
                         No projects match your search query "{searchQuery}". Try
                         a different search term.
@@ -1033,7 +1018,7 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                   </div>
                 ) : (
                   <div
-                    className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-3 sm:gap-x-4 gap-y-6 sm:gap-y-8 overflow-y-auto pretty-scrollbar items-start flex-1 min-h-0"
+                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-3 sm:gap-x-4 gap-y-5 sm:gap-y-6 md:gap-y-8 overflow-y-auto pretty-scrollbar items-start flex-1 min-h-0"
                     onScroll={(e) => {
                       if (effectiveIsLoading) return
                       if (!hasMore) return
