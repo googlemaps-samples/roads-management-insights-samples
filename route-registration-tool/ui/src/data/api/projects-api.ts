@@ -386,6 +386,8 @@ export const projectsApi = {
   // Import project from zip file
   importProject: async (
     file: File,
+    sessionId: string,
+    forceReplace = false,
   ): Promise<
     ApiResponse<{
       new_project_id: number
@@ -400,7 +402,10 @@ export const projectsApi = {
         new_project_id: number
         routes_inserted: number
         routes_skipped_uuid_exists: number
-      }>("/import_project", file)
+      }>("/import_project", file, {
+        session_id: sessionId,
+        force_replace: String(forceReplace),
+      })
       return {
         success: true,
         data: {

@@ -552,6 +552,9 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [projectToRename, setProjectToRename] = useState<Project | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [replaceConfirmOpen, setReplaceConfirmOpen] = useState(false)
+  const [replaceConfirmMessage, setReplaceConfirmMessage] = useState("")
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
   const [isImporting, setIsImporting] = useState(false)
   const projectZipInputRef = useRef<HTMLInputElement>(null)
 
@@ -602,6 +605,13 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
   const handleImportFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
+    if (!sessionId) {
+      toast.error("Import Failed", {
+        description: "Missing active session. Refresh and try again.",
+      })
+      return
+    }
+
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -613,9 +623,26 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
       return
     }
 
+    setPendingImportFile(file)
+    await executeImport(file, false)
+  }
+
+  const executeImport = async (file: File, forceReplace: boolean) => {
+    const activeSessionId = sessionId
+    if (!activeSessionId) {
+      toast.error("Import Failed", {
+        description: "Missing active session. Refresh and try again.",
+      })
+      return
+    }
+
     setIsImporting(true)
     try {
-      const result = await projectsApi.importProject(file)
+      const result = await projectsApi.importProject(
+        file,
+        activeSessionId,
+        forceReplace,
+      )
 
       if (result.success && result.data) {
         const { new_project_id, routes_inserted } = result.data
@@ -634,9 +661,20 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
 
         // Close dialog
         handleImportDialogClose()
+        setReplaceConfirmOpen(false)
+        setReplaceConfirmMessage("")
+        setPendingImportFile(null)
       } else {
         // Show error toast and keep modal open
         const errorMessage = result.message || "Failed to import project"
+        if (errorMessage.startsWith("PROJECT_EXISTS::")) {
+          setReplaceConfirmMessage(
+            errorMessage.replace("PROJECT_EXISTS::", "").trim(),
+          )
+          setImportDialogOpen(false)
+          setReplaceConfirmOpen(true)
+          return
+        }
         console.error("Import project failed:", errorMessage)
         toast.error("Import Failed", {
           description: errorMessage,
@@ -650,6 +688,12 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
       console.error("Error importing project:", error)
       const errorMessage =
         error instanceof Error ? error.message : "Failed to import project"
+      if (errorMessage.startsWith("PROJECT_EXISTS::")) {
+        setReplaceConfirmMessage(errorMessage.replace("PROJECT_EXISTS::", "").trim())
+        setImportDialogOpen(false)
+        setReplaceConfirmOpen(true)
+        return
+      }
       toast.error("Import Failed", {
         description: errorMessage,
       })
@@ -659,6 +703,21 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
       }
     } finally {
       setIsImporting(false)
+    }
+  }
+
+  const handleReplaceConfirm = async () => {
+    if (!pendingImportFile) return
+    await executeImport(pendingImportFile, true)
+  }
+
+  const handleReplaceCancel = () => {
+    setReplaceConfirmOpen(false)
+    setReplaceConfirmMessage("")
+    setImportDialogOpen(true)
+    setPendingImportFile(null)
+    if (projectZipInputRef.current) {
+      projectZipInputRef.current.value = ""
     }
   }
 
@@ -1195,6 +1254,44 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
             extracted from the ZIP file.
           </Typography>
         </Box>
+      </Modal>
+
+      <Modal
+        open={replaceConfirmOpen}
+        onClose={handleReplaceCancel}
+        maxWidth="sm"
+        title="Replace Existing Project?"
+        actions={
+          <>
+            <Button
+              onClick={handleReplaceCancel}
+              variant="text"
+              disabled={isImporting}
+              sx={{
+                color: "#5f6368",
+                "&:hover": {
+                  backgroundColor: "rgba(95, 99, 104, 0.08)",
+                },
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReplaceConfirm}
+              variant="contained"
+              disabled={isImporting}
+            >
+              {isImporting ? "Replacing..." : "Delete & Import"}
+            </Button>
+          </>
+        }
+      >
+        <Typography variant="body2" className="text-gray-700">
+          {replaceConfirmMessage ||
+            "A project with this name already exists in your session."}{" "}
+          This will delete the existing project and all its routes before
+          importing.
+        </Typography>
       </Modal>
     </div>
   )
