@@ -54,7 +54,7 @@ export default function ProjectWorkspacePage() {
       <ProjectWorkspaceLayout
         projectId={projectId}
         apiKey={apiKey}
-        className="h-[calc(100vh-64px)]"
+        className="h-[calc(100vh-var(--app-nav-height,4rem))]"
       />
     </PageLayout>
   )

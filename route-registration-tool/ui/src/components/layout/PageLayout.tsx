@@ -52,7 +52,7 @@ export default function PageLayout({ children }: PageLayoutProps) {
       onReset={() => window.location.reload()}
     >
       <div className="h-screen w-screen overflow-hidden flex flex-col">
-        <Navbar variant="workspace" />
+        <Navbar />
         <div className="flex-1 w-full relative flex flex-col">{children}</div>
       </div>
     </ErrorBoundary>

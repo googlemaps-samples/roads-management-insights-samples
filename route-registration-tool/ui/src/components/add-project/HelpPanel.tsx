@@ -48,7 +48,7 @@ export default function HelpPanel({
 
   return (
     <Box
-      className="absolute right-0 top-16 h-full flex transition-all duration-300 z-[1000]"
+      className="absolute right-0 top-[var(--app-nav-height,4rem)] bottom-0 min-h-0 flex transition-all duration-300 z-[1000]"
       sx={{
         width: minimized ? 0 : { xs: "100%", sm: 400 },
         fontFamily: '"Google Sans", "Roboto", "Helvetica", "Arial", sans-serif',

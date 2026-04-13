@@ -552,6 +552,9 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [projectToRename, setProjectToRename] = useState<Project | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [replaceConfirmOpen, setReplaceConfirmOpen] = useState(false)
+  const [replaceConfirmMessage, setReplaceConfirmMessage] = useState("")
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
   const [isImporting, setIsImporting] = useState(false)
   const projectZipInputRef = useRef<HTMLInputElement>(null)
 
@@ -602,6 +605,13 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
   const handleImportFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
+    if (!sessionId) {
+      toast.error("Import Failed", {
+        description: "Missing active session. Refresh and try again.",
+      })
+      return
+    }
+
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -613,9 +623,26 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
       return
     }
 
+    setPendingImportFile(file)
+    await executeImport(file, false)
+  }
+
+  const executeImport = async (file: File, forceReplace: boolean) => {
+    const activeSessionId = sessionId
+    if (!activeSessionId) {
+      toast.error("Import Failed", {
+        description: "Missing active session. Refresh and try again.",
+      })
+      return
+    }
+
     setIsImporting(true)
     try {
-      const result = await projectsApi.importProject(file)
+      const result = await projectsApi.importProject(
+        file,
+        activeSessionId,
+        forceReplace,
+      )
 
       if (result.success && result.data) {
         const { new_project_id, routes_inserted } = result.data
@@ -634,9 +661,20 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
 
         // Close dialog
         handleImportDialogClose()
+        setReplaceConfirmOpen(false)
+        setReplaceConfirmMessage("")
+        setPendingImportFile(null)
       } else {
         // Show error toast and keep modal open
         const errorMessage = result.message || "Failed to import project"
+        if (errorMessage.startsWith("PROJECT_EXISTS::")) {
+          setReplaceConfirmMessage(
+            errorMessage.replace("PROJECT_EXISTS::", "").trim(),
+          )
+          setImportDialogOpen(false)
+          setReplaceConfirmOpen(true)
+          return
+        }
         console.error("Import project failed:", errorMessage)
         toast.error("Import Failed", {
           description: errorMessage,
@@ -650,6 +688,12 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
       console.error("Error importing project:", error)
       const errorMessage =
         error instanceof Error ? error.message : "Failed to import project"
+      if (errorMessage.startsWith("PROJECT_EXISTS::")) {
+        setReplaceConfirmMessage(errorMessage.replace("PROJECT_EXISTS::", "").trim())
+        setImportDialogOpen(false)
+        setReplaceConfirmOpen(true)
+        return
+      }
       toast.error("Import Failed", {
         description: errorMessage,
       })
@@ -659,6 +703,21 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
       }
     } finally {
       setIsImporting(false)
+    }
+  }
+
+  const handleReplaceConfirm = async () => {
+    if (!pendingImportFile) return
+    await executeImport(pendingImportFile, true)
+  }
+
+  const handleReplaceCancel = () => {
+    setReplaceConfirmOpen(false)
+    setReplaceConfirmMessage("")
+    setImportDialogOpen(true)
+    setPendingImportFile(null)
+    if (projectZipInputRef.current) {
+      projectZipInputRef.current.value = ""
     }
   }
 
@@ -722,10 +781,10 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
     <div
       className="absolute left-1/2 -translate-x-1/2 w-full max-w-[100vw] min-[400px]:max-w-[95vw] sm:max-w-[90vw] md:max-w-[85vw] lg:max-w-[95vw] xl:max-w-[90rem] px-2 sm:px-4 z-10 box-border"
       style={{
-        top: "max(calc(64px + 1rem), calc(64px + env(safe-area-inset-top, 0px) + 0.75rem))",
+        top: "max(calc(var(--app-nav-height, 4rem) + 1rem), calc(var(--app-nav-height, 4rem) + env(safe-area-inset-top, 0px) + 0.75rem))",
         bottom: "max(1rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem))",
         maxHeight:
-          "calc(100vh - 64px - max(2rem, env(safe-area-inset-bottom, 0px) + 1rem) - env(safe-area-inset-top, 0px))",
+          "calc(100vh - var(--app-nav-height, 4rem) - max(2rem, env(safe-area-inset-bottom, 0px) + 1rem) - env(safe-area-inset-top, 0px))",
       }}
     >
       <Fade in timeout={600}>
@@ -930,8 +989,8 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                     ))}
                   </div>
                 ) : projects.length === 0 ? (
-                  <div className="flex flex-1 min-h-0 flex-col items-center justify-center py-3 sm:py-6 md:py-10 overflow-hidden">
-                    <div className="text-center max-w-md px-2 sm:px-4 w-full min-h-0 shrink">
+                  <div className="flex flex-1 min-h-0 flex-col items-center justify-center py-3 sm:py-6 md:py-10 overflow-y-auto overflow-x-hidden pretty-scrollbar pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
+                    <div className="text-center max-w-md px-2 sm:px-4 w-full shrink-0">
                       <Typography
                         variant="h6"
                         className="font-semibold text-gray-900 mb-2 text-base sm:text-lg md:text-xl"
@@ -951,28 +1010,28 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
                         startIcon={<Add />}
                         data-tour="add-project-empty"
                         sx={{
-                          backgroundColor: "#1967D2",
-                          color: "#ffffff",
-                          textTransform: "none",
-                          fontSize: "14px",
-                          fontWeight: 500,
-                          padding: "10px 24px",
-                          width: "100%",
-                          maxWidth: "320px",
-                          mx: "auto",
-                          display: "block",
-                          boxShadow:
-                            "0 1px 3px rgba(25, 103, 210, 0.4), 0 1px 2px rgba(25, 103, 210, 0.3)",
-                          "@media (min-width: 600px)": {
-                            width: "auto",
-                            maxWidth: "none",
-                            mx: 0,
+                          display: "none",
+                          "@media (min-width: 640px)": {
                             display: "inline-flex",
+                            backgroundColor: "#0b57d0",
+                            color: "#ffffff",
+                            textTransform: "none",
+                            fontSize: "12px",
+                            fontWeight: 500,
+                            padding: "8px 16px",
+                            borderRadius: "24px",
+                            width: "auto",
+                            boxShadow:
+                              "0 1px 3px rgba(11, 87, 208, 0.4), 0 1px 2px rgba(11, 87, 208, 0.3)",
                           },
                           "&:hover": {
-                            backgroundColor: "#1557B0",
+                            backgroundColor: "#0942a0",
                             boxShadow:
-                              "0 2px 6px rgba(25, 103, 210, 0.4), 0 2px 4px rgba(25, 103, 210, 0.3)",
+                              "0 2px 6px rgba(11, 87, 208, 0.4), 0 2px 4px rgba(11, 87, 208, 0.3)",
+                          },
+                          "&:active": {
+                            boxShadow: "0 1px 3px rgba(11, 87, 208, 0.4)",
+                            transform: "translateY(1px)",
                           },
                           transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
                         }}
@@ -1195,6 +1254,44 @@ const ProjectGrid: React.FC<ProjectGridProps> = ({
             extracted from the ZIP file.
           </Typography>
         </Box>
+      </Modal>
+
+      <Modal
+        open={replaceConfirmOpen}
+        onClose={handleReplaceCancel}
+        maxWidth="sm"
+        title="Replace Existing Project?"
+        actions={
+          <>
+            <Button
+              onClick={handleReplaceCancel}
+              variant="text"
+              disabled={isImporting}
+              sx={{
+                color: "#5f6368",
+                "&:hover": {
+                  backgroundColor: "rgba(95, 99, 104, 0.08)",
+                },
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReplaceConfirm}
+              variant="contained"
+              disabled={isImporting}
+            >
+              {isImporting ? "Replacing..." : "Delete & Import"}
+            </Button>
+          </>
+        }
+      >
+        <Typography variant="body2" className="text-gray-700">
+          {replaceConfirmMessage ||
+            "A project with this name already exists in your session."}{" "}
+          This will delete the existing project and all its routes before
+          importing.
+        </Typography>
       </Modal>
     </div>
   )

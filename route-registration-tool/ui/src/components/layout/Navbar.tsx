@@ -147,55 +147,93 @@ export default function Navbar() {
         open={sessionManagerOpen}
         onClose={() => setSessionManagerOpen(false)}
       />
-      <div className="flex items-center justify-between h-16 px-6 relative">
-        {/* Left Side: Logo + Divider + App Name */}
+      <div
+        className="
+        w-full max-w-full min-w-0 box-border
+        max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)_auto] max-sm:grid-rows-[auto_auto]
+        max-sm:gap-x-2 max-sm:gap-y-2 max-sm:py-2.5 max-sm:px-3
+        sm:relative sm:flex sm:h-16 sm:min-h-16 sm:items-center sm:gap-2 sm:px-4 sm:py-0 md:px-6
+      "
+      >
+        {/* Line 1 (mobile): logo only — line 2: app name. sm+: logo | divider | app name inline */}
         <div
-          className="flex items-center gap-3 cursor-pointer select-none"
+          className={`max-sm:col-start-1 max-sm:row-start-1 flex items-center gap-2 sm:gap-3 min-w-0 shrink-0 cursor-pointer select-none sm:shrink sm:relative sm:z-10 ${isProjectPage ? "sm:max-w-[13rem] md:max-w-[40%] lg:max-w-none" : ""}`}
           onClick={handleLogoClick}
         >
           <img
             src={GoogleMapsLogo}
             alt="Google Maps Platform"
-            className="h-6 w-auto"
+            className="h-5 w-auto sm:h-6 shrink-0 object-contain object-left sm:max-w-[5.5rem] md:max-w-none"
           />
-          <Divider orientation="vertical" flexItem className="h-6" />
-          <span className="text-base font-medium text-[#202124] tracking-tight">
+          <Divider
+            orientation="vertical"
+            flexItem
+            className="h-5 sm:h-6 hidden sm:block shrink-0"
+          />
+          <span className="hidden sm:inline text-sm sm:text-base font-semibold text-[#202124] tracking-tight truncate min-w-0 flex-1 basis-0">
             Roads Selection Tool
           </span>
         </div>
 
-        {/* Center: Project Name with Total Count */}
-        {isProjectPage && projectData?.name && (
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-0.5">
-            <span className="text-base font-extrabold text-[#5f6368] max-w-[200px] truncate">
-              {projectData.name}
+        {/* Mobile: product title — aligned with platform wordmark, clear hierarchy vs GMP row */}
+        <div
+          className="max-sm:col-span-3 max-sm:row-start-2 min-w-0 sm:hidden cursor-pointer select-none border-t border-gray-200/90 pt-2 px-2"
+          onClick={handleLogoClick}
+        >
+          <div className="flex items-start gap-2 min-w-0">
+            <span
+              className="mt-0.5 h-5 w-0.5 shrink-0 rounded-full bg-[#1a73e8]"
+              aria-hidden
+            />
+            <span className="text-base font-semibold leading-snug text-[#202124] tracking-tight truncate min-w-0">
+              Roads Selection Tool
             </span>
-            {routesSummary && (
-              <>
-                <span className="text-base font-extrabold text-[#5f6368] px-1 py-0.5 ">
-                  ({routesSummary.total})
-                </span>
-                <Tooltip
-                  title="Total number of syncable routes/segments in this project"
-                  arrow
-                  placement="right"
-                >
-                  <IconButton
-                    size="small"
-                    className="text-[#9aa0a6] hover:text-[#5f6368] hover:bg-gray-100 p-0.5"
-                    aria-label="Routes summary info"
-                    sx={{ padding: "2px" }}
-                  >
-                    <InfoIcon sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </Tooltip>
-              </>
-            )}
           </div>
-        )}
+        </div>
 
-        {/* Right Side: Search Bar (only in project pages) + Utility Icons */}
-        <div className="flex items-center gap-2">
+        {/* Center: project title — viewport-centered on sm+ (flex-1 centering skews when L/R widths differ) */}
+        <div
+          className="
+            max-sm:col-start-2 max-sm:row-start-1 min-w-0 flex justify-center items-center px-1 sm:px-2 overflow-hidden
+            sm:absolute sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-max sm:max-w-[min(28rem,calc(100vw-10rem))]
+            sm:pointer-events-none sm:overflow-visible sm:z-[5]
+          "
+        >
+          {isProjectPage && projectData?.name ? (
+            <div className="flex items-center gap-0.5 min-w-0 max-w-full justify-center sm:pointer-events-auto">
+              <span
+                className="text-sm sm:text-base font-extrabold text-[#5f6368] truncate text-center"
+                title={projectData.name}
+              >
+                {projectData.name}
+              </span>
+              {routesSummary && (
+                <>
+                  <span className="text-sm sm:text-base font-extrabold text-[#5f6368] px-0.5 sm:px-1 py-0.5 shrink-0 whitespace-nowrap">
+                    ({routesSummary.total})
+                  </span>
+                  <Tooltip
+                    title="Total number of syncable routes/segments in this project"
+                    arrow
+                    placement="bottom"
+                  >
+                    <IconButton
+                      size="small"
+                      className="text-[#9aa0a6] hover:text-[#5f6368] hover:bg-gray-100 p-0.5 shrink-0"
+                      aria-label="Routes summary info"
+                      sx={{ padding: "2px" }}
+                    >
+                      <InfoIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Right: actions (row 1 on mobile grid); ml-auto on sm+ balances absolute-centered title */}
+        <div className="max-sm:col-start-3 max-sm:row-start-1 flex items-center gap-0.5 sm:gap-1 md:gap-2 shrink-0 sm:ml-auto sm:relative sm:z-10">
           {isProjectPage && <MapSearchBar isProjectPage={isProjectPage} />}
 
           {/* Map Controls: Home View and Satellite Toggle */}
@@ -322,6 +360,7 @@ export default function Navbar() {
               <IconButton
                 onClick={() => setSessionManagerOpen(true)}
                 size="small"
+                className="text-[#5f6368] hover:bg-gray-100"
                 aria-label="Share projects"
                 disabled={!sessionId}
                 data-tour="session-sharing"
@@ -335,6 +374,7 @@ export default function Navbar() {
             <IconButton
               onClick={() => setPreferencesDialogOpen(true)}
               size="small"
+              className="text-[#5f6368] hover:bg-gray-100"
               aria-label="User preferences"
             >
               <SettingsIcon fontSize="small" />

@@ -18,6 +18,18 @@
 
 /* Google Sans font family */
 @layer base {
+  /* Navbar height: two-line header below sm; single row sm+ (matches Tailwind sm = 600px) */
+  :root {
+    /* Two-line navbar: GMP row + application title block */
+    --app-nav-height: 5.75rem;
+  }
+
+  @media (min-width: 600px) {
+    :root {
+      --app-nav-height: 4rem;
+    }
+  }
+
   html {
     font-family: "Google Sans", "Roboto", "Helvetica", "Arial", sans-serif;
   }
@@ -454,17 +466,17 @@
   0% {
     box-shadow:
       0 0 0 6px rgba(25, 118, 210, 0.14),
-      0 0 0 0 rgba(25, 118, 210, 0.0);
+      0 0 0 0 rgba(25, 118, 210, 0);
   }
   60% {
     box-shadow:
       0 0 0 10px rgba(25, 118, 210, 0.18),
-      0 0 0 14px rgba(25, 118, 210, 0.0);
+      0 0 0 14px rgba(25, 118, 210, 0);
   }
   100% {
     box-shadow:
       0 0 0 6px rgba(25, 118, 210, 0.14),
-      0 0 0 0 rgba(25, 118, 210, 0.0);
+      0 0 0 0 rgba(25, 118, 210, 0);
   }
 }
 
