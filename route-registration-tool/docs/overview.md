@@ -15,7 +15,7 @@ In the Road Selection Tool, every project is a distinct entity defined by a **Gl
 
 ### Workspaces & Session-Based Sharing
 The tool operates on a **Workspace** model tied to a unique `session_id`.
-*   **Personal Workspace**: By default, each user starts in their own secure workspace.
+*   **Personal Workspace**: By default, each user starts in their own workspace (scoped to a unique session ID).
 *   **Collaborative Linking**: Workspaces can be shared by linking two or more session IDs. Once linked, users share visibility and control over all projects within that combined workspace. This peer-to-peer sharing model simplifies collaboration without the overhead of traditional user management.
 
 ### Intelligent Snapping (Google Roads API)
