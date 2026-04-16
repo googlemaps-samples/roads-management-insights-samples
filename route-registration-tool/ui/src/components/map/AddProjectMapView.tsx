@@ -16,6 +16,7 @@ import { useMap } from "@vis.gl/react-google-maps"
 import { useEffect, useRef } from "react"
 import * as turf from "@turf/turf"
 
+import { isWorldJurisdictionGeoJson } from "../../utils/world-jurisdiction-geojson"
 import { StaticMap } from "./StaticMap"
 
 function MapWithGeoJson({ boundaryGeoJson }: { boundaryGeoJson?: any }) {
@@ -45,7 +46,7 @@ function MapWithGeoJson({ boundaryGeoJson }: { boundaryGeoJson?: any }) {
       dataLayer.remove(feature)
     })
 
-    if (!boundaryGeoJson) return
+    if (!boundaryGeoJson || isWorldJurisdictionGeoJson(boundaryGeoJson)) return
 
     // Add new GeoJSON
     try {
