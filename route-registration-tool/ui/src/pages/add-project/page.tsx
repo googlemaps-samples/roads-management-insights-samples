@@ -61,6 +61,17 @@ export default function AddProjectPage() {
     Array.isArray(stepIndices) && stepIndices.length > 0
       ? !stepIndices.includes(3)
       : (clientConfig?.new_project_creation_steps ?? 4) <= 1
+  const jurisdictionStepVisible = !hideJurisdictionOverlay
+  const multitenantOptionalBoundary =
+    clientConfig?.enable_multitenant === true && jurisdictionStepVisible
+  // Whole-world default has no on-map outline (same as skipped jurisdiction step)
+  let mapBoundaryGeoJson = geoJsonState.uploadedGeoJson
+  if (
+    hideJurisdictionOverlay ||
+    (multitenantOptionalBoundary && !geoJsonState.uploadedGeoJson)
+  ) {
+    mapBoundaryGeoJson = null
+  }
 
   return (
     <PageLayout>
@@ -69,7 +80,7 @@ export default function AddProjectPage() {
           {/* Map Background — hide jurisdiction overlay when the boundary step is skipped */}
           <AddProjectMapView
             apiKey={apiKey}
-            boundaryGeoJson={hideJurisdictionOverlay ? null : geoJsonState.uploadedGeoJson}
+            boundaryGeoJson={mapBoundaryGeoJson}
             style={{ width: "100%", height: "100%" }}
           />
 
