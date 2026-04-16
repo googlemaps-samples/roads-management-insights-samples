@@ -5,10 +5,10 @@ This guide walks you through the core product workflows, from project creation t
 ---
 
 ## 1. Initializing Your Workspace (Creating a Project)
-Every project starts by defining a new workspace with a unique identity.
+Projects are created within your existing session-scoped workspace.
 1.  From the **Dashboard**, click **"Add Project"**.
-2.  Provide a **Name** and **Description**.
-3.  Specify your **Google Cloud Project ID** and target **BigQuery Dataset**.
+2.  Specify your **Google Cloud Project ID** and target **BigQuery Dataset**.
+3.  Provide a **Project Name**.
 4.  Once created, your project is assigned a permanent **Project UUID**, and your interactive map workspace is ready.
 
 ---
@@ -26,7 +26,7 @@ Once in your workspace, the goal is to curate precise road routes.
 Sharing your entire workspace with colleagues is done through **Session Linking**.
 1.  Locate your unique **Session ID** (this is a UUID representing your current workspace session).
 2.  Obtain the Session ID of the teammate you wish to collaborate with.
-3.  Use the **Link Session** tool to bind these IDs.
+3.  Use **Share projects** → **Link user** to bind these IDs.
 4.  **Shared Visibility**: Both users can now view, edit, and contribute to all projects within the linked workspace.
 
 ---
