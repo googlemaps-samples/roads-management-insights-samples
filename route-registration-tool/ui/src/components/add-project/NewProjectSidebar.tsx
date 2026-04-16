@@ -33,29 +33,7 @@ import GcpProjectSelector from "./GcpProjectSelector"
 import GeoJsonUploader from "./GeoJsonUploader"
 import ProjectNameForm from "./ProjectNameForm"
 import { useSessionId } from "../../hooks/use-session-id"
-
-/** WGS84 polygon covering the full globe (multi-tenant default jurisdiction). */
-const WORLD_JURISDICTION_GEO_JSON: GeoJSON.FeatureCollection = {
-  type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "Polygon",
-        coordinates: [
-          [
-            [-180, -90],
-            [180, -90],
-            [180, 90],
-            [-180, 90],
-            [-180, -90],
-          ],
-        ],
-      },
-    },
-  ],
-}
+import { WORLD_JURISDICTION_GEO_JSON } from "../../utils/world-jurisdiction-geojson"
 
 const FULL_FLOW_STEPS = [
   "Google Cloud Project",
@@ -122,6 +100,10 @@ export default function NewProjectSidebar({
 
   const isGcpStepVisible = visibleOriginalSteps.includes(0)
   const isJurisdictionStepVisible = visibleOriginalSteps.includes(3)
+  const enableMultitenant = clientConfig?.enable_multitenant === true
+  /** When multitenant is on, jurisdiction upload is optional; default is whole-world boundary. */
+  const isJurisdictionBoundaryOptional =
+    enableMultitenant && isJurisdictionStepVisible
 
   // Notify parent of step changes
   React.useEffect(() => {
@@ -442,9 +424,15 @@ export default function NewProjectSidebar({
     updateFormState({ isLoading: true, error: null })
 
     try {
-      const boundaryGeoJson = isJurisdictionStepVisible
-        ? geoJsonState.uploadedGeoJson
-        : WORLD_JURISDICTION_GEO_JSON
+      let boundaryGeoJson
+      if (!isJurisdictionStepVisible) {
+        boundaryGeoJson = WORLD_JURISDICTION_GEO_JSON
+      } else if (isJurisdictionBoundaryOptional) {
+        boundaryGeoJson =
+          geoJsonState.uploadedGeoJson ?? WORLD_JURISDICTION_GEO_JSON
+      } else {
+        boundaryGeoJson = geoJsonState.uploadedGeoJson
+      }
 
       if (!boundaryGeoJson) {
         const errorMsg = "Please upload a valid GeoJSON boundary"
@@ -547,9 +535,12 @@ export default function NewProjectSidebar({
           requiredGcpPresent &&
           requiredDatasetPresent
         )
-      case 3:
-        // Jurisdiction boundary is required when this is the last step.
-        return requiredGcpPresent && requiredDatasetPresent && hasBoundary
+      case 3: {
+        const boundaryOk = isJurisdictionBoundaryOptional
+          ? !geoJsonState.error
+          : hasBoundary
+        return requiredGcpPresent && requiredDatasetPresent && boundaryOk
+      }
       default:
         return false
     }
@@ -611,6 +602,7 @@ export default function NewProjectSidebar({
           <Box className="py-3">
             <GeoJsonUploader
               state={geoJsonState}
+              boundaryUploadOptional={isJurisdictionBoundaryOptional}
               onFileUpload={handleFileUpload}
               onDownloadSample={handleDownloadSample}
               onDragEnter={handleDragEnter}
