@@ -23,6 +23,8 @@ import { GeoJsonUploadState } from "../../types/region-creation"
 
 interface GeoJsonUploaderProps {
   state: GeoJsonUploadState
+  /** When true (multi-tenant mode), upload is optional; default jurisdiction is whole-world. */
+  boundaryUploadOptional?: boolean
   onFileUpload: (file: File) => void
   onDownloadSample: () => void
   onDragEnter: (e: React.DragEvent) => void
@@ -33,6 +35,7 @@ interface GeoJsonUploaderProps {
 
 export default function GeoJsonUploader({
   state,
+  boundaryUploadOptional = false,
   onFileUpload,
   onDownloadSample,
   onDragEnter,
@@ -57,11 +60,13 @@ export default function GeoJsonUploader({
       <div className="space-y-1">
         <Typography variant="body2" className="font-semibold text-sm">
           Jurisdiction Boundary
+          {boundaryUploadOptional ? " (optional)" : ""}
         </Typography>
         <Box className="flex flex-col gap-1">
           <Typography variant="caption" className="text-mui-secondary text-xs">
-            Upload a GeoJSON file that defines the geographic boundary of your
-            jurisdiction.
+            {boundaryUploadOptional
+              ? "Optionally upload a GeoJSON file for your jurisdiction. If you skip this, the project uses a whole-world jurisdiction boundary."
+              : "Upload a GeoJSON file that defines the geographic boundary of your jurisdiction."}
           </Typography>
           <Typography variant="caption" className="text-mui-secondary text-xs">
             This boundary will be used to filter and monitor traffic within the
@@ -106,12 +111,16 @@ export default function GeoJsonUploader({
                   ? "Uploaded Successfully"
                   : state.dragActive
                     ? "Drop here"
-                    : "Upload Jurisdiction Boundary"}
+                    : boundaryUploadOptional
+                      ? "Upload boundary (or use default)"
+                      : "Upload Jurisdiction Boundary"}
               </p>
               <p className="text-xs text-mui-secondary">
                 {state.uploadedGeoJson
                   ? "Upload or drop a new file to replace"
-                  : ".geojson and .json files supported"}
+                  : boundaryUploadOptional
+                    ? ".geojson and .json files — or continue for whole-world default"
+                    : ".geojson and .json files supported"}
               </p>
             </div>
           </div>
