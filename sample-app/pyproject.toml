@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi (>=0.116.1,<0.117.0)",
     "uvicorn[standard] (>=0.35.0,<0.36.0)",
-    "python-dotenv (>=1.1.1,<2.0.0)",
+    "python-dotenv (>=1.2.2,<2.0.0)",
     "brotli-asgi (>=1.4.0,<2.0.0)",
     "google-cloud-bigquery (>=2.0.0)",
     "google-cloud-bigquery-storage (>=2.0.0)",
