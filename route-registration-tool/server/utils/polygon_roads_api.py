@@ -24,15 +24,13 @@ import math
 import json
 from sqlalchemy import text
 from .create_engine import engine
+from .auth import get_oauth_token_sync, get_adc_project_id
 
 
 # Load env
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 API_URL = os.getenv("POLYGON_ROADS_API_URL")
-API_KEY = os.getenv('GOOGLE_API_KEY')
-if not API_KEY:
-    raise ValueError("GOOGLE_API_KEY is not set")
 
 @dataclass
 class RoadData:
@@ -192,8 +190,22 @@ def create_roads_batch(roads: list, project_id: int, priority_list: Optional[Lis
 
 
 def fetch_roads_generator(polygon_geometry: Dict[str, Any]):
+    """
+    Stream roads from the Roads API for the given polygon.
+
+    Authenticates with Application Default Credentials (service account on
+    Cloud Run, or `gcloud auth application-default login` locally). Quota is
+    attributed to the ADC principal's home project — the same project used
+    by the GCP project-list lookup.
+    """
     page_token = None
     total_fetched = 0
+    token = get_oauth_token_sync()
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'X-Goog-User-Project': get_adc_project_id(),
+        'Content-Type': 'application/json'
+    }
 
     while True:
         request_payload = {
@@ -205,11 +217,6 @@ def fetch_roads_generator(polygon_geometry: Dict[str, Any]):
             request_payload["pageToken"] = page_token
 
         logging.info(f"Sending API request... (Total fetched so far: {total_fetched})")
-
-        headers = {
-            'X-Goog-Api-Key': API_KEY,
-            'Content-Type': 'application/json'
-        }
 
         try:
             response = requests.post(API_URL, json=request_payload, headers=headers)
