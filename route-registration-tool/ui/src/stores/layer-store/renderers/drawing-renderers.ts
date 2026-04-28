@@ -19,6 +19,7 @@ import { getRoadLineString } from "../../../utils/road-selection"
 import { Road as ProjectRoad } from "../../project-workspace-store"
 import { DIRECTION_ARROW_WIDTH_PIXELS } from "../constants"
 import { DeckGLLayer } from "../types"
+import { isWorldJurisdictionGeoJson } from "../../../utils/world-jurisdiction-geojson"
 import { getColorsForMapType } from "../utils/color-utils"
 
 export function createPolygonDrawingLayer(
@@ -259,6 +260,11 @@ export function createJurisdictionBoundaryLayer(
   mapType: "roadmap" | "hybrid" = "roadmap",
 ): DeckGLLayer | null {
   if (!boundaryGeoJson) {
+    return null
+  }
+
+  // Whole-world default: do not draw a visible boundary
+  if (isWorldJurisdictionGeoJson(boundaryGeoJson)) {
     return null
   }
 

@@ -15,12 +15,13 @@ In the Road Selection Tool, every project is a distinct entity defined by a **Gl
 
 ### Workspaces & Session-Based Sharing
 The tool operates on a **Workspace** model tied to a unique `session_id`.
-*   **Personal Workspace**: By default, each user starts in their own secure workspace.
+*   **Personal Workspace**: By default, each user starts in their own workspace (scoped to a unique session ID).
 *   **Collaborative Linking**: Workspaces can be shared by linking two or more session IDs. Once linked, users share visibility and control over all projects within that combined workspace. This peer-to-peer sharing model simplifies collaboration without the overhead of traditional user management.
 
 ### Intelligent Snapping (Google Roads API)
 A core value of the tool is its ability to turn manual map clicks into precise road geometries.
 *   **Snapping Mechanism**: The tool integrates directly with the [Google Roads API](https://developers.google.com/maps/documentation/roads-api). As you select points on the map, the tool "snaps" them to the actual road network, correcting for GPS noise and providing the clean polylines required for [RMI analysis](https://developers.google.com/maps/documentation/roads-management-insights/overview).
+*   **Authentication**: All backend Google Maps Platform calls — including Roads API and route selection — authenticate via a **service account** using Application Default Credentials (OAuth bearer tokens). Quota is billed to the ADC principal's home project (the same project used by the GCP project-list lookup), not to the per-app GCP project selected in the UI. API keys are used only by the browser for the Maps JavaScript loader.
 
 ---
 
