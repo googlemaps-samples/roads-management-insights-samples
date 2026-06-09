@@ -16,6 +16,20 @@ import { Usecase } from "../../types/common"
 
 // Demo cities data - shared across the application
 export const DEMO_CITIES: Record<string, City> = {
+  singapore: {
+    id: "singapore",
+    name: "Singapore",
+    coords: { lat: 1.317966, lng: 103.866679 },
+    subTitle: "Expressways and Major Arterial Roads",
+    availableDateRanges: {
+      startDate: new Date(2026, 4, 4, 0, 0, 0),
+      endDate: new Date(2026, 5, 2, 23, 59, 59),
+    },
+    liveDataDate: new Date(2026, 5, 3, 15, 1, 56),
+    zoom: 13,
+    useCases: ["realtime-monitoring","data-analytics"] as Usecase[],
+    timezone: "Asia/Singapore",
+  },
   paris: {
     id: "paris",
     name: "Paris",
