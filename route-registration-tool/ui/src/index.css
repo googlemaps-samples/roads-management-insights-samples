@@ -13,38 +13,49 @@
  * limitations under the License.
  */
 
-
 @layer theme, base, mui, components, utilities;
-@import 'tailwindcss';
+@import "tailwindcss";
 
 /* Google Sans font family */
 @layer base {
-  html {
-    font-family: 'Google Sans', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+  /* Navbar height: two-line header below sm; single row sm+ (matches Tailwind sm = 600px) */
+  :root {
+    /* Two-line navbar: GMP row + application title block */
+    --app-nav-height: 5.75rem;
   }
-  
+
+  @media (min-width: 600px) {
+    :root {
+      --app-nav-height: 4rem;
+    }
+  }
+
+  html {
+    font-family: "Google Sans", "Roboto", "Helvetica", "Arial", sans-serif;
+  }
+
   body {
-    font-family: 'Google Sans', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+    font-family: "Google Sans", "Roboto", "Helvetica", "Arial", sans-serif;
   }
 
   .pretty-scrollbar::-webkit-scrollbar {
     width: 0.5rem;
   }
-  
+
   .pretty-scrollbar::-webkit-scrollbar-track {
     border-radius: 9999px;
     background-color: rgb(243 244 246); /* gray-100 */
   }
-  
+
   .pretty-scrollbar::-webkit-scrollbar-thumb {
     border-radius: 9999px;
     background-color: rgb(209 213 219); /* gray-300 */
   }
-  
+
   .dark .pretty-scrollbar::-webkit-scrollbar-track {
     background-color: rgb(64 64 64); /* neutral-700 */
   }
-  
+
   .dark .pretty-scrollbar::-webkit-scrollbar-thumb {
     background-color: rgb(115 115 115); /* neutral-500 */
   }
@@ -89,7 +100,9 @@
   --color-secondary: rgb(var(--mui-palette-secondary-mainChannel));
   --color-secondary-light: rgb(var(--mui-palette-secondary-lightChannel));
   --color-secondary-dark: rgb(var(--mui-palette-secondary-darkChannel));
-  --color-secondary-contrast: rgb(var(--mui-palette-secondary-contrastTextChannel));
+  --color-secondary-contrast: rgb(
+    var(--mui-palette-secondary-contrastTextChannel)
+  );
 
   /* Material UI status colors */
   --color-info: rgb(var(--mui-palette-info-mainChannel));
@@ -194,7 +207,9 @@
 
   /* LinearProgress */
   --color-LinearProgress-primary: var(--mui-palette-LinearProgress-primaryBg);
-  --color-LinearProgress-secondary: var(--mui-palette-LinearProgress-secondaryBg);
+  --color-LinearProgress-secondary: var(
+    --mui-palette-LinearProgress-secondaryBg
+  );
   --color-LinearProgress-error: var(--mui-palette-LinearProgress-errorBg);
   --color-LinearProgress-info: var(--mui-palette-LinearProgress-infoBg);
   --color-LinearProgress-success: var(--mui-palette-LinearProgress-successBg);
@@ -216,7 +231,9 @@
   --color-SnackbarContent-text: var(--mui-palette-SnackbarContent-color);
 
   /* SpeedDialAction */
-  --color-SpeedDialAction-fabHover: var(--mui-palette-SpeedDialAction-fabHoverBg);
+  --color-SpeedDialAction-fabHover: var(
+    --mui-palette-SpeedDialAction-fabHoverBg
+  );
 
   /* StepConnector & StepContent */
   --color-StepConnector-border: var(--mui-palette-StepConnector-border);
@@ -224,13 +241,23 @@
 
   /* Switch */
   --color-Switch-default: var(--mui-palette-Switch-defaultColor);
-  --color-Switch-defaultDisabled: var(--mui-palette-Switch-defaultDisabledColor);
-  --color-Switch-primaryDisabled: var(--mui-palette-Switch-primaryDisabledColor);
-  --color-Switch-secondaryDisabled: var(--mui-palette-Switch-secondaryDisabledColor);
+  --color-Switch-defaultDisabled: var(
+    --mui-palette-Switch-defaultDisabledColor
+  );
+  --color-Switch-primaryDisabled: var(
+    --mui-palette-Switch-primaryDisabledColor
+  );
+  --color-Switch-secondaryDisabled: var(
+    --mui-palette-Switch-secondaryDisabledColor
+  );
   --color-Switch-errorDisabled: var(--mui-palette-Switch-errorDisabledColor);
   --color-Switch-infoDisabled: var(--mui-palette-Switch-infoDisabledColor);
-  --color-Switch-successDisabled: var(--mui-palette-Switch-successDisabledColor);
-  --color-Switch-warningDisabled: var(--mui-palette-Switch-warningDisabledColor);
+  --color-Switch-successDisabled: var(
+    --mui-palette-Switch-successDisabledColor
+  );
+  --color-Switch-warningDisabled: var(
+    --mui-palette-Switch-warningDisabledColor
+  );
 
   /* TableCell */
   --color-TableCell-border: var(--mui-palette-TableCell-border);
@@ -301,9 +328,9 @@
 /* Material UI base styles */
 @layer base {
   * {
-    font-family: 'Google Sans', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+    font-family: "Google Sans", "Roboto", "Helvetica", "Arial", sans-serif;
   }
-  
+
   h1 {
     font: var(--mui-font-h1);
     letter-spacing: -0.01562em;
@@ -357,69 +384,160 @@
   .text-mui-primary {
     color: var(--color-primary);
   }
-  
+
   .text-mui-secondary {
     color: var(--color-text-secondary);
   }
-  
+
   .text-mui-disabled {
     color: var(--color-text-disabled);
   }
-  
+
   .bg-mui-primary {
     background-color: var(--color-primary);
   }
-  
+
   .border-mui-divider {
     border-color: var(--color-divider);
   }
-  
+
   .bg-mui-paper {
     background-color: var(--color-background-paper);
   }
-  
+
   .shadow-mui-1 {
     box-shadow: var(--shadow-1);
   }
-  
+
   .shadow-mui-2 {
     box-shadow: var(--shadow-2);
   }
-  
+
   /* Custom scrollbar utilities */
   .scrollbar-thin {
     scrollbar-width: thin;
   }
-  
+
   .scrollbar-track-transparent {
     scrollbar-color: transparent transparent;
   }
-  
+
   .scrollbar-thumb-black\/10 {
     scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
   }
-  
+
   .scrollbar-thumb-rounded-sm {
     /* For webkit browsers */
     &::-webkit-scrollbar {
       width: 6px;
     }
-    
+
     &::-webkit-scrollbar-track {
       background: transparent;
     }
-    
+
     &::-webkit-scrollbar-thumb {
       background: rgba(0, 0, 0, 0.1);
       border-radius: 3px;
     }
   }
-  
+
   .webkit-overflow-scrolling-touch {
     -webkit-overflow-scrolling: touch;
   }
 }
 
-.gm-style, .gm-style * {
+.gm-style,
+.gm-style * {
   cursor: auto !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard tour highlighting                                        */
+/* ------------------------------------------------------------------ */
+.rst-tour-highlight {
+  outline: 3px solid rgba(25, 118, 210, 0.9);
+  outline-offset: 4px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 6px rgba(25, 118, 210, 0.18);
+}
+
+@keyframes rst-tour-pulse {
+  0% {
+    box-shadow:
+      0 0 0 6px rgba(25, 118, 210, 0.14),
+      0 0 0 0 rgba(25, 118, 210, 0);
+  }
+  60% {
+    box-shadow:
+      0 0 0 10px rgba(25, 118, 210, 0.18),
+      0 0 0 14px rgba(25, 118, 210, 0);
+  }
+  100% {
+    box-shadow:
+      0 0 0 6px rgba(25, 118, 210, 0.14),
+      0 0 0 0 rgba(25, 118, 210, 0);
+  }
+}
+
+.rst-tour-pulse {
+  animation: rst-tour-pulse 1.35s ease-in-out infinite;
+}
+
+.rst-tour-spotlight-ring {
+  outline: 3px solid rgba(25, 118, 210, 0.92);
+  outline-offset: 0;
+}
+
+.rst-tour-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.rst-tour-arrow--up {
+  top: 1px;
+  transform: translate(-50%, -100%);
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-bottom: 11px solid #ffffff;
+  filter: drop-shadow(0 -1px 0 rgba(32, 33, 36, 0.06));
+}
+
+.rst-tour-arrow--down {
+  bottom: 1px;
+  transform: translate(-50%, 100%);
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-top: 11px solid #ffffff;
+  filter: drop-shadow(0 1px 0 rgba(32, 33, 36, 0.06));
+}
+
+@keyframes rst-tour-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rst-tour-card-inner {
+  animation: rst-tour-card-in 240ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rst-tour-pulse {
+    animation: none;
+  }
+
+  .rst-tour-card-inner {
+    animation: none;
+  }
 }

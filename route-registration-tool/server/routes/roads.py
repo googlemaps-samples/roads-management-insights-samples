@@ -22,7 +22,15 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from shapely.geometry import LineString, shape
 
-from server.db.database import query_db
+from server.db.common import (
+    SQL_ROADS_CHECK_EXISTS_BY_ID,
+    SQL_ROADS_GET_BY_ID,
+    SQL_ROADS_LIST_BY_PROJECT_ID,
+    SQL_ROADS_SELECT_FOR_POLYGON_SELECTION_BASE,
+    SQL_ROADS_SOFT_DELETE_BY_ID,
+    query_db,
+    sql_roads_update_set_clause,
+)
 
 # Setup logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -76,16 +84,8 @@ async def get_roads_by_project(project_id: int):
     """
     try:
         logger.info(f"Fetching all roads for project ID: {project_id}")
-        
-        query = """
-        SELECT id, project_id, polyline, center_lat, center_lng, length, is_enabled, name,
-               created_at, updated_at, is_selected
-        FROM roads 
-        WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY created_at DESC
-        """
-        
-        rows = await query_db(query, (project_id,))
+
+        rows = await query_db(SQL_ROADS_LIST_BY_PROJECT_ID, (project_id,))
         
         roads = [
             RoadOut(
@@ -125,28 +125,7 @@ async def select_roads_by_polygon(selection: RoadSelectionRequest):
         raise HTTPException(status_code=400, detail="Invalid polygon payload")
 
     min_lng, min_lat, max_lng, max_lat = polygon_shape.bounds
-    query = """
-    SELECT
-        id,
-        project_id,
-        polyline,
-        center_lat,
-        center_lng,
-        length,
-        is_enabled,
-        name,
-        created_at,
-        updated_at,
-        is_selected
-    FROM roads
-    WHERE project_id = ?
-      AND deleted_at IS NULL
-      AND is_enabled = 1
-      AND max_lat >= ?
-      AND min_lat <= ?
-      AND max_lng >= ?
-      AND min_lng <= ?
-    """
+    query = SQL_ROADS_SELECT_FOR_POLYGON_SELECTION_BASE
 
     params: List[Any] = [
         selection.project_id,
@@ -211,15 +190,8 @@ async def get_road_by_id(road_id: int):
     """Get a specific road by ID"""
     try:
         logger.info(f"Fetching road with ID: {road_id}")
-        
-        query = """
-        SELECT id, project_id, polyline, center_lat, center_lng, length, is_enabled, name,
-               created_at, updated_at, is_selected
-        FROM roads 
-        WHERE id = ? AND deleted_at IS NULL
-        """
-        
-        row = await query_db(query, (road_id,), one=True)
+
+        row = await query_db(SQL_ROADS_GET_BY_ID, (road_id,), one=True)
         
         if not row:
             raise HTTPException(status_code=404, detail="Road not found")
@@ -254,8 +226,7 @@ async def update_road(road_id: int, updates: RoadUpdate):
         logger.info(f"Updating road ID: {road_id} with updates: {updates}")
         
         # First, check if road exists
-        check_query = "SELECT id, project_id FROM roads WHERE id = ? AND deleted_at IS NULL"
-        existing_road = await query_db(check_query, (road_id,), one=True)
+        existing_road = await query_db(SQL_ROADS_CHECK_EXISTS_BY_ID, (road_id,), one=True)
         
         if not existing_road:
             raise HTTPException(status_code=404, detail="Road not found")
@@ -290,23 +261,12 @@ async def update_road(road_id: int, updates: RoadUpdate):
 
         
         # Execute update
-        update_query = f"""
-        UPDATE roads 
-        SET {', '.join(update_fields)}
-        WHERE id = ?
-        """
+        update_query = sql_roads_update_set_clause(", ".join(update_fields))
         
         await query_db(update_query, tuple(params), one=False , commit=True)
         
         # Fetch and return updated road
-        updated_road_query = """
-        SELECT id, project_id, polyline, center_lat, center_lng, length, is_enabled, name,
-               created_at, updated_at, is_selected
-        FROM roads 
-        WHERE id = ?
-        """
-        
-        row = await query_db(updated_road_query, (road_id,), one=True)
+        row = await query_db(SQL_ROADS_GET_BY_ID, (road_id,), one=True)
         
         road = RoadOut(
             id=row["id"],
@@ -337,20 +297,13 @@ async def soft_delete_road(road_id: int):
         logger.info(f"Soft deleting road ID: {road_id}")
         
         # Check if road exists
-        check_query = "SELECT id, project_id FROM roads WHERE id = ? AND deleted_at IS NULL"
-        existing_road = await query_db(check_query, (road_id,), one=True)
+        existing_road = await query_db(SQL_ROADS_CHECK_EXISTS_BY_ID, (road_id,), one=True)
         
         if not existing_road:
             raise HTTPException(status_code=404, detail="Road not found")
         
         # Soft delete by setting deleted_at
-        delete_query = """
-        UPDATE roads 
-        SET deleted_at = datetime('now'), updated_at = datetime('now')
-        WHERE id = ?
-        """
-        
-        await query_db(delete_query, (road_id,), one=False , commit=True)
+        await query_db(SQL_ROADS_SOFT_DELETE_BY_ID, (road_id,), one=False, commit=True)
         
         logger.info(f"Successfully soft deleted road {road_id}")
         

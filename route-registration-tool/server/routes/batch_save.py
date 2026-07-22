@@ -22,9 +22,10 @@ import logging
 import os
 from shapely.geometry import LineString, shape
 from pyproj import Proj
+from sqlalchemy import text
 
 from .routes import RouteCoordinates, RouteSaveRequest
-from server.db.database import query_db, get_db_transaction
+from server.db.common import query_db, get_db_transaction
 from server.utils.firebase_logger import log_route_creation_async
 
 router = APIRouter(prefix="/routes", tags=["Batch Save"])
@@ -201,24 +202,32 @@ async def batch_save_routes(request: BatchSaveRoutesRequest, background_tasks: B
         center_json = json.dumps(center)
 
         now = datetime.now().isoformat()
-        to_insert.append((  # Prepare data for insertion
-                uuid,
-                r.region_id,
-                project_uuid,
-                r.route_name,
-                origin_json,
-                dest_json,
-                waypoints_json,
-                center_json,
-                r.route_type or "individual",
-                length_km,
-                r.encoded_polyline,
-                s["start_lat"], s["start_lng"], s["end_lat"], s["end_lng"],
-                s["min_lat"], s["max_lat"], s["min_lng"], s["max_lng"],
-                r.tag if r.tag else "",
-                original_geojson,
-                match_percentage
-            ))
+        to_insert.append({  # Prepare data for insertion
+                "uuid": uuid,
+                "project_id": r.region_id,
+                "project_uuid": project_uuid,
+                "route_name": r.route_name,
+                "origin": origin_json,
+                "destination": dest_json,
+                "waypoints": waypoints_json,
+                "center": center_json,
+                "route_type": r.route_type or "individual",
+                "length": length_km,
+                "encoded_polyline": r.encoded_polyline,
+                "start_lat": s["start_lat"],
+                "start_lng": s["start_lng"],
+                "end_lat": s["end_lat"],
+                "end_lng": s["end_lng"],
+                "min_lat": s["min_lat"],
+                "max_lat": s["max_lat"],
+                "min_lng": s["min_lng"],
+                "max_lng": s["max_lng"],
+                "tag": r.tag if r.tag else "",
+                "original_route_geo_json": original_geojson,
+                "match_percentage": match_percentage,
+                "is_enabled": True,
+                "sync_status": "unsynced",
+            })
 
         responses.append({
             "success": True,
@@ -245,7 +254,7 @@ async def batch_save_routes(request: BatchSaveRoutesRequest, background_tasks: B
     if to_insert:
         logger.debug(f"Inserting {len(to_insert)} new routes into the database.")
         async with get_db_transaction() as conn:
-            await conn.executemany(""" 
+            insert_sql = text("""
                 INSERT INTO routes (
                     uuid, project_id, project_uuid, route_name, origin, destination, waypoints, center,
                     route_type, length, encoded_polyline,
@@ -253,13 +262,21 @@ async def batch_save_routes(request: BatchSaveRoutesRequest, background_tasks: B
                     min_lat, max_lat, min_lng, max_lng,
                     tag, original_route_geo_json, match_percentage,
                     is_enabled, sync_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'unsynced')
-            """, to_insert)
+                ) VALUES (
+                    :uuid, :project_id, :project_uuid, :route_name, :origin, :destination, :waypoints, :center,
+                    :route_type, :length, :encoded_polyline,
+                    :start_lat, :start_lng, :end_lat, :end_lng,
+                    :min_lat, :max_lat, :min_lng, :max_lng,
+                    :tag, :original_route_geo_json, :match_percentage,
+                    :is_enabled, :sync_status
+                )
+            """)
+            await conn.execute(insert_sql, to_insert)
         
         # Log each route creation to Firestore asynchronously (non-blocking)
         # Only log routes that were successfully inserted (those in to_insert)
-        for route_tuple in to_insert:
-            uuid = route_tuple[0]
+        for inserted_route in to_insert:
+            uuid = inserted_route["uuid"]
             if uuid in processed and "error" not in processed[uuid]:
                 item = processed[uuid]
                 r = item["route"]

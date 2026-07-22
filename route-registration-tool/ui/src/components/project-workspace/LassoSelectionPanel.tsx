@@ -259,7 +259,7 @@ const LassoSelectionPanel: React.FC = () => {
   return (
     <>
       <Box
-        className="fixed left-0 top-16 h-[calc(100vh-4rem)] bg-white flex"
+        className="fixed left-0 top-[var(--app-nav-height,4rem)] h-[calc(100vh-var(--app-nav-height,4rem))] bg-white flex"
         sx={{
           width: "360px",
           fontFamily: "'Google Sans', 'Roboto', sans-serif",

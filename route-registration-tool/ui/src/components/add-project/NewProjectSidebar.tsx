@@ -12,29 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// ui/src/components/add-project/NewProjectSidebar.tsx
 import { Box, CircularProgress, Paper, Typography } from "@mui/material"
-import React, { useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { FormProvider, useForm } from "react-hook-form"
 import { useNavigate } from "react-router-dom"
 
-import { useCreateProject, useProjects } from "../../hooks/use-api"
+import {
+  useClientConfig,
+  useCreateProject,
+  useGcpProjects,
+} from "../../hooks/use-api"
 import { useProjectCreationStore } from "../../stores"
 import { RegionCreationFormData } from "../../types/region-creation"
 import { clearAllLayers } from "../../utils/clear-all-layers"
+import { buildSessionPath } from "../../utils/session"
 import { toast } from "../../utils/toast"
 import Button from "../common/Button"
 import DatasetNameForm from "./DatasetNameForm"
 import GcpProjectSelector from "./GcpProjectSelector"
 import GeoJsonUploader from "./GeoJsonUploader"
 import ProjectNameForm from "./ProjectNameForm"
+import { useSessionId } from "../../hooks/use-session-id"
+import { WORLD_JURISDICTION_GEO_JSON } from "../../utils/world-jurisdiction-geojson"
 
-const steps = [
+const FULL_FLOW_STEPS = [
   "Google Cloud Project",
   "Dataset Name",
   "Project Name",
   "Jurisdiction Boundary",
-]
+] as const
 
 interface NewProjectSidebarProps {
   onStepChange?: (step: number) => void
@@ -44,12 +50,65 @@ export default function NewProjectSidebar({
   onStepChange,
 }: NewProjectSidebarProps) {
   const navigate = useNavigate()
+  const sessionId = useSessionId()
   const [activeStep, setActiveStep] = useState(0)
+  const didApplyMultitenantDefaults = useRef(false)
+  const didToastGcpError = useRef(false)
+
+  const { data: clientConfig, isPending: isClientConfigPending } =
+    useClientConfig()
+  const stepIndices =
+    clientConfig?.new_project_creation_step_indices &&
+      clientConfig.new_project_creation_step_indices.length > 0
+      ? clientConfig.new_project_creation_step_indices.slice().sort((a, b) => a - b)
+      : null
+
+  // Visible steps are chosen via step indices.
+  // If indices are not provided, fall back to the count-based behavior for backward compatibility.
+  const visibleOriginalSteps: number[] = stepIndices
+    ? Array.from(new Set(stepIndices)).filter((i) => i >= 0 && i <= 3)
+    : (() => {
+      const newProjectCreationSteps = Math.max(
+        1,
+        Math.min(4, clientConfig?.new_project_creation_steps ?? 4),
+      )
+
+      // Visible steps are a suffix of the original flow, but we always keep "Project Name".
+      // 1 step => [2]
+      // 2 steps => [2,3]
+      // 3 steps => [1,2,3]
+      // 4 steps => [0,1,2,3]
+      return [
+        ...(newProjectCreationSteps === 4 ? [0] : []),
+        ...(newProjectCreationSteps >= 3 ? [1] : []),
+        2,
+        ...(newProjectCreationSteps >= 2 ? [3] : []),
+      ]
+    })()
+
+  // Step 2 (Project Name) is always required.
+  if (!visibleOriginalSteps.includes(2)) {
+    visibleOriginalSteps.push(2)
+    visibleOriginalSteps.sort((a, b) => a - b)
+  }
+
+  const activeOriginalStep = visibleOriginalSteps[activeStep] ?? 2
+
+  const stepLabels = visibleOriginalSteps.map(
+    (i) => FULL_FLOW_STEPS[i as 0 | 1 | 2 | 3],
+  )
+
+  const isGcpStepVisible = visibleOriginalSteps.includes(0)
+  const isJurisdictionStepVisible = visibleOriginalSteps.includes(3)
+  const enableMultitenant = clientConfig?.enable_multitenant === true
+  /** When multitenant is on, jurisdiction upload is optional; default is whole-world boundary. */
+  const isJurisdictionBoundaryOptional =
+    enableMultitenant && isJurisdictionStepVisible
 
   // Notify parent of step changes
   React.useEffect(() => {
-    onStepChange?.(activeStep)
-  }, [activeStep, onStepChange])
+    onStepChange?.(activeOriginalStep)
+  }, [activeOriginalStep, onStepChange])
 
   // Store hooks
   const {
@@ -62,7 +121,7 @@ export default function NewProjectSidebar({
 
   // Real API hooks
   const createProjectMutation = useCreateProject()
-  const { data: existingProjects } = useProjects()
+  const { data: gcpProjectsResponse } = useGcpProjects()
 
   // Form setup with validation
   const methods = useForm<RegionCreationFormData>({
@@ -108,10 +167,54 @@ export default function NewProjectSidebar({
     watch,
     trigger,
     getValues,
+    setValue,
     formState: hookFormState,
   } = methods
   const watchedValues = watch()
   const { errors } = hookFormState
+
+  useEffect(() => {
+    // When the GCP step is hidden, we still need GCP ids for project creation.
+    if (isGcpStepVisible) return
+    if (didApplyMultitenantDefaults.current) return
+    if (!gcpProjectsResponse) return
+
+    if (!gcpProjectsResponse.success) {
+      if (!didToastGcpError.current && gcpProjectsResponse.message) {
+        didToastGcpError.current = true
+        toast.error("GCP Projects Fetch Failed", {
+          description: gcpProjectsResponse.message,
+        })
+      }
+      return
+    }
+
+    const projects = gcpProjectsResponse.data || []
+    if (!projects.length) return
+
+    didApplyMultitenantDefaults.current = true
+    const first = projects[0]
+
+    setValue(
+      "googleCloudProjectId",
+      first.project_id ?? "",
+      { shouldValidate: false, shouldDirty: false },
+    )
+    setValue(
+      "googleCloudProjectNumber",
+      first.project_number ?? "",
+      { shouldValidate: false, shouldDirty: false },
+    )
+  }, [isGcpStepVisible, gcpProjectsResponse, setValue])
+
+  useEffect(() => {
+    // When the jurisdiction step is hidden, default to a world-covering polygon.
+    if (isJurisdictionStepVisible || isClientConfigPending) return
+    updateGeoJsonState({
+      uploadedGeoJson: WORLD_JURISDICTION_GEO_JSON,
+      error: null,
+    })
+  }, [isJurisdictionStepVisible, isClientConfigPending, updateGeoJsonState])
 
   // File upload with strict validation
   const handleFileUpload = (file: File) => {
@@ -138,18 +241,21 @@ export default function NewProjectSidebar({
         const geoJson = JSON.parse(text)
 
         // Validate GeoJSON structure
-        let features: any[] = []
+        type MaybePolygonFeature = {
+          geometry?: { type?: string }
+        }
+        let features: MaybePolygonFeature[] = []
+
         if (geoJson.type === "FeatureCollection") {
-          features = geoJson.features || []
+          features =
+            (geoJson as { features?: MaybePolygonFeature[] }).features || []
         } else if (geoJson.type === "Feature") {
-          features = [geoJson]
+          features = [geoJson as MaybePolygonFeature]
         } else if (geoJson.type === "Polygon") {
           // Direct Polygon geometry
           features = [
             {
-              type: "Feature",
-              geometry: geoJson,
-              properties: {},
+              geometry: { type: "Polygon" },
             },
           ]
         } else {
@@ -216,6 +322,7 @@ export default function NewProjectSidebar({
           description: "GeoJSON file validated successfully",
         })
       } catch (error) {
+        console.error("Failed to parse GeoJSON:", error)
         // JSON parse error - Error Type 4
         updateGeoJsonState({
           uploadedGeoJson: null,
@@ -293,14 +400,18 @@ export default function NewProjectSidebar({
     e.preventDefault()
 
     // If not on last step, go to next step instead of submitting
-    if (activeStep < steps.length - 1) {
+    if (activeStep < stepLabels.length - 1) {
       await handleNext()
       return
     }
 
     // Only submit on the last step
-    const isValid = await trigger()
-    if (isValid && isStepValid(activeStep)) {
+    const lastStepValid =
+      activeOriginalStep === 2
+        ? (await trigger("name")) && isStepValid(activeOriginalStep)
+        : isStepValid(activeOriginalStep)
+
+    if (lastStepValid) {
       const formData = getValues()
       await onSubmit(formData)
     }
@@ -313,7 +424,17 @@ export default function NewProjectSidebar({
     updateFormState({ isLoading: true, error: null })
 
     try {
-      if (!geoJsonState.uploadedGeoJson) {
+      let boundaryGeoJson
+      if (!isJurisdictionStepVisible) {
+        boundaryGeoJson = WORLD_JURISDICTION_GEO_JSON
+      } else if (isJurisdictionBoundaryOptional) {
+        boundaryGeoJson =
+          geoJsonState.uploadedGeoJson ?? WORLD_JURISDICTION_GEO_JSON
+      } else {
+        boundaryGeoJson = geoJsonState.uploadedGeoJson
+      }
+
+      if (!boundaryGeoJson) {
         const errorMsg = "Please upload a valid GeoJSON boundary"
         toast.error("Missing Boundary", {
           description: errorMsg,
@@ -332,7 +453,7 @@ export default function NewProjectSidebar({
 
       const projectData = {
         name: data.name,
-        boundaryGeoJson: geoJsonState.uploadedGeoJson,
+        boundaryGeoJson,
         bigQueryColumn: {
           googleCloudProjectId: data.googleCloudProjectId,
           googleCloudProjectNumber: data.googleCloudProjectNumber,
@@ -353,7 +474,11 @@ export default function NewProjectSidebar({
         })
         // Clear all layers before navigating to the new project
         clearAllLayers()
-        navigate(`/project/${project.id}`)
+        navigate(
+          sessionId
+            ? buildSessionPath(sessionId, `/project/${project.id}`)
+            : `/project/${project.id}`,
+        )
       } else {
         throw new Error("Failed to create project")
       }
@@ -373,78 +498,77 @@ export default function NewProjectSidebar({
 
   const handleCancel = () => {
     clearProjectCreationState()
-    navigate("/dashboard")
+    navigate(sessionId ? buildSessionPath(sessionId, "/dashboard") : "/dashboard")
   }
 
   // Step validation - checks both field values and form validation errors
-  const isStepValid = (step: number): boolean => {
-    switch (step) {
-      case 0: {
-        // Step 1: GCP Project - check values and validation errors
-        const hasGcpProjectId = watchedValues.googleCloudProjectId.trim() !== ""
-        const hasGcpProjectNumber =
-          watchedValues.googleCloudProjectNumber.trim() !== ""
-        const hasGcpErrors =
-          !!errors.googleCloudProjectId || !!errors.googleCloudProjectNumber
-        return hasGcpProjectId && hasGcpProjectNumber && !hasGcpErrors
+  const isStepValid = (originalStep: number): boolean => {
+    const hasName = watchedValues.name.trim() !== ""
+    const hasNameError = !!errors.name
+
+    const hasDatasetName = watchedValues.datasetName?.trim() !== ""
+    const hasDatasetNameError = !!errors.datasetName
+
+    const hasGcpProjectId = watchedValues.googleCloudProjectId.trim() !== ""
+    const hasGcpProjectNumber =
+      watchedValues.googleCloudProjectNumber.trim() !== ""
+    const hasGcpErrors =
+      !!errors.googleCloudProjectId || !!errors.googleCloudProjectNumber
+
+    const hasBoundary =
+      geoJsonState.uploadedGeoJson !== null && !geoJsonState.error
+
+    const requiredGcpPresent =
+      hasGcpProjectId && hasGcpProjectNumber && !hasGcpErrors
+    const requiredDatasetPresent = hasDatasetName && !hasDatasetNameError
+
+    switch (originalStep) {
+      case 0:
+        return requiredGcpPresent
+      case 1:
+        return requiredDatasetPresent
+      case 2:
+        // Project Name is always visible, but earlier steps may be hidden.
+        return (
+          hasName &&
+          !hasNameError &&
+          requiredGcpPresent &&
+          requiredDatasetPresent
+        )
+      case 3: {
+        const boundaryOk = isJurisdictionBoundaryOptional
+          ? !geoJsonState.error
+          : hasBoundary
+        return requiredGcpPresent && requiredDatasetPresent && boundaryOk
       }
-      case 1: {
-        // Step 2: Dataset Name - check value and validation errors
-        const hasDatasetName = watchedValues.datasetName?.trim() !== ""
-        const hasDatasetNameError = !!errors.datasetName
-        return hasDatasetName && !hasDatasetNameError
-      }
-      case 2: {
-        // Step 3: Project Name - check value and validation errors
-        const hasName = watchedValues.name.trim() !== ""
-        const hasNameError = !!errors.name
-        return hasName && !hasNameError
-      }
-      case 3:
-        // Step 4: GeoJSON - check if uploaded and no error
-        return geoJsonState.uploadedGeoJson !== null && !geoJsonState.error
       default:
         return false
     }
   }
 
   const handleNext = async () => {
-    // Trigger validation for current step
-    let isValid = false
-
-    switch (activeStep) {
-      case 0: {
-        // Validate GCP Project fields
-        const gcpValid = await trigger([
-          "googleCloudProjectId",
-          "googleCloudProjectNumber",
-        ])
-        isValid = gcpValid && isStepValid(activeStep)
-        break
+    const isOriginalStepValid = async (originalStep: number) => {
+      switch (originalStep) {
+        case 0:
+          return (
+            (await trigger([
+              "googleCloudProjectId",
+              "googleCloudProjectNumber",
+            ])) && isStepValid(0)
+          )
+        case 1:
+          return (await trigger("datasetName")) && isStepValid(1)
+        case 2:
+          return (await trigger("name")) && isStepValid(2)
+        case 3:
+          return isStepValid(3)
+        default:
+          return false
       }
-      case 1: {
-        // Validate Dataset Name
-        const datasetNameValid = await trigger("datasetName")
-        isValid = datasetNameValid && isStepValid(activeStep)
-        break
-      }
-      case 2: {
-        // Validate Project Name
-        const nameValid = await trigger("name")
-        isValid = nameValid && isStepValid(activeStep)
-        break
-      }
-      case 3:
-        // Validate GeoJSON
-        isValid = isStepValid(activeStep)
-        break
-      default:
-        isValid = false
     }
 
-    if (isValid) {
-      setActiveStep((prevStep) => prevStep + 1)
-    }
+    const valid = await isOriginalStepValid(activeOriginalStep)
+    if (valid) setActiveStep((prevStep) => prevStep + 1)
   }
 
   const handleBack = () => {
@@ -453,8 +577,8 @@ export default function NewProjectSidebar({
 
   const isLoading = formState.isLoading || createProjectMutation.isPending
 
-  const renderStepContent = (step: number) => {
-    switch (step) {
+  const renderStepContent = (originalStep: number) => {
+    switch (originalStep) {
       case 0:
         return (
           <Box className="py-3">
@@ -478,6 +602,7 @@ export default function NewProjectSidebar({
           <Box className="py-3">
             <GeoJsonUploader
               state={geoJsonState}
+              boundaryUploadOptional={isJurisdictionBoundaryOptional}
               onFileUpload={handleFileUpload}
               onDownloadSample={handleDownloadSample}
               onDragEnter={handleDragEnter}
@@ -510,17 +635,30 @@ export default function NewProjectSidebar({
           Create New Project
         </Typography>
         <Typography variant="caption" className="text-mui-secondary text-xs">
-          Step {activeStep + 1} of {steps.length}: {steps[activeStep]}
+          {isClientConfigPending ? (
+            "Loading…"
+          ) : (
+            <>
+              Step {activeStep + 1} of {stepLabels.length}:{" "}
+              {stepLabels[activeStep]}
+            </>
+          )}
         </Typography>
       </Box>
 
       {/* Content */}
       <Box className="flex-1 overflow-auto pretty-scrollbar px-4">
-        <FormProvider {...methods}>
-          <form onSubmit={handleFormSubmit}>
-            {renderStepContent(activeStep)}
-          </form>
-        </FormProvider>
+        {isClientConfigPending ? (
+          <Box className="flex justify-center items-center py-12">
+            <CircularProgress size={28} />
+          </Box>
+        ) : (
+          <FormProvider {...methods}>
+            <form onSubmit={handleFormSubmit}>
+              {renderStepContent(activeOriginalStep)}
+            </form>
+          </FormProvider>
+        )}
       </Box>
 
       {/* Navigation Buttons */}
@@ -528,7 +666,7 @@ export default function NewProjectSidebar({
         <Box className="flex gap-2">
           <Button
             onClick={handleCancel}
-            disabled={isLoading}
+            disabled={isLoading || isClientConfigPending}
             variant="outlined"
             // size="small"
             className="flex-1 "
@@ -538,7 +676,7 @@ export default function NewProjectSidebar({
           {activeStep > 0 && (
             <Button
               onClick={handleBack}
-              disabled={isLoading}
+              disabled={isLoading || isClientConfigPending}
               variant="outlined"
               // size="small"
               className="flex-1 "
@@ -546,10 +684,14 @@ export default function NewProjectSidebar({
               Back
             </Button>
           )}
-          {activeStep < steps.length - 1 ? (
+          {activeStep < stepLabels.length - 1 ? (
             <Button
               onClick={handleNext}
-              disabled={!isStepValid(activeStep) || isLoading}
+              disabled={
+                !isStepValid(activeOriginalStep) ||
+                isLoading ||
+                isClientConfigPending
+              }
               variant="contained"
               // size="small"
               className="flex-1 "
@@ -559,7 +701,11 @@ export default function NewProjectSidebar({
           ) : (
             <Button
               onClick={handleSubmit(onSubmit)}
-              disabled={!isStepValid(activeStep) || isLoading}
+              disabled={
+                !isStepValid(activeOriginalStep) ||
+                isLoading ||
+                isClientConfigPending
+              }
               variant="contained"
               size="small"
               className="flex-1 text-xs"

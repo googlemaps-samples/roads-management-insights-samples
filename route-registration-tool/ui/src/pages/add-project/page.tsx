@@ -20,12 +20,14 @@ import ToastContainer from "../../components/common/ToastContainer"
 import Main from "../../components/layout/Main"
 import PageLayout from "../../components/layout/PageLayout"
 import AddProjectMapView from "../../components/map/AddProjectMapView"
+import { useClientConfig } from "../../hooks/use-api"
 import { useProjectCreationStore } from "../../stores"
 import { getGoogleMapsApiKey } from "../../utils/api-helpers"
 
 export default function AddProjectPage() {
   const [helpPanelMinimized, setHelpPanelMinimized] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
+  const { data: clientConfig } = useClientConfig()
   const geoJsonState = useProjectCreationStore((state) => state.geoJsonState)
   const clearProjectCreationState = useProjectCreationStore(
     (state) => state.clearProjectCreationState,
@@ -54,15 +56,31 @@ export default function AddProjectPage() {
   }, [clearProjectCreationState])
 
   const apiKey = getGoogleMapsApiKey()
+  const stepIndices = clientConfig?.new_project_creation_step_indices ?? null
+  const hideJurisdictionOverlay =
+    Array.isArray(stepIndices) && stepIndices.length > 0
+      ? !stepIndices.includes(3)
+      : (clientConfig?.new_project_creation_steps ?? 4) <= 1
+  const jurisdictionStepVisible = !hideJurisdictionOverlay
+  const multitenantOptionalBoundary =
+    clientConfig?.enable_multitenant === true && jurisdictionStepVisible
+  // Whole-world default has no on-map outline (same as skipped jurisdiction step)
+  let mapBoundaryGeoJson = geoJsonState.uploadedGeoJson
+  if (
+    hideJurisdictionOverlay ||
+    (multitenantOptionalBoundary && !geoJsonState.uploadedGeoJson)
+  ) {
+    mapBoundaryGeoJson = null
+  }
 
   return (
     <PageLayout>
       <Main>
         <div className="flex-1 relative h-full w-full">
-          {/* Map Background */}
+          {/* Map Background — hide jurisdiction overlay when the boundary step is skipped */}
           <AddProjectMapView
             apiKey={apiKey}
-            boundaryGeoJson={geoJsonState.uploadedGeoJson}
+            boundaryGeoJson={mapBoundaryGeoJson}
             style={{ width: "100%", height: "100%" }}
           />
 
@@ -72,6 +90,7 @@ export default function AddProjectPage() {
           {/* Help Panel - Always open, content changes based on step */}
           <HelpPanel
             step={currentStep}
+            multitenantProjectCreation={false}
             minimized={helpPanelMinimized}
             onToggleMinimize={() => setHelpPanelMinimized(!helpPanelMinimized)}
           />

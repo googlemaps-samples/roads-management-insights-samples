@@ -16,7 +16,7 @@
 import json
 import uuid
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from server.db.database import query_db, get_db_transaction
+from server.db.common import query_db, get_db_transaction
 from server.routes.routes import get_route_by_uuid
 from server.utils.compute_parent_sync_status import update_parent_sync_status
 from server.utils.firebase_logger import log_route_creation_async
@@ -318,6 +318,7 @@ async def apply_segmentation(route_uuid: str, segmentation_data: SegmentationReq
     except HTTPException:
         raise
     except Exception as e:
+        print("error", e)
         logger.error(f"Error applying segmentation to route {route_uuid}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to apply segmentation")
 

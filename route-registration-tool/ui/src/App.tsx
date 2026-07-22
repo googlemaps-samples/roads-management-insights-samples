@@ -17,6 +17,7 @@ import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom"
 
 import RootLayout from "./components/layout/RootLayout"
 import UserPreferencesLoader from "./components/user-preferences/UserPreferencesLoader"
+import SessionBootstrap from "./components/session/SessionBootstrap"
 import AddProjectPage from "./pages/add-project/page"
 import DashboardPage from "./pages/dashboard/page"
 import ProjectWorkspacePage from "./pages/project/[projectId]/page"
@@ -28,19 +29,40 @@ const router = createBrowserRouter([
     children: [
       {
         path: "/",
-        element: <Navigate to="/dashboard" replace />,
+        element: <SessionBootstrap />,
       },
       {
         path: "/dashboard",
-        element: <DashboardPage />,
+        element: <SessionBootstrap />,
       },
       {
         path: "/add-project",
-        element: <AddProjectPage />,
+        element: <SessionBootstrap />,
       },
       {
         path: "/project/:projectId",
-        element: <ProjectWorkspacePage />,
+        element: <SessionBootstrap />,
+      },
+      {
+        path: "/:sessionId",
+        children: [
+          {
+            path: "dashboard",
+            element: <DashboardPage />,
+          },
+          {
+            path: "add-project",
+            element: <AddProjectPage />,
+          },
+          {
+            path: "project/:projectId",
+            element: <ProjectWorkspacePage />,
+          },
+          {
+            index: true,
+            element: <Navigate to="dashboard" replace />,
+          },
+        ],
       },
     ],
   },

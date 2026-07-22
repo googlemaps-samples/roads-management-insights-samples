@@ -21,6 +21,71 @@ import { transformProject } from "../transformers"
 
 // Projects API
 export const projectsApi = {
+  // Get projects paginated
+  getPaginated: async (
+    page: number,
+    limit: number,
+    search?: string,
+    sessionId?: string,
+  ): Promise<
+    ApiResponse<{
+      projects: Project[]
+      pagination: {
+        page: number
+        limit: number
+        total: number
+        has_more: boolean
+      }
+      route_summaries: Record<string, { total: number; deleted: number; added: number }>
+    }>
+  > => {
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+      })
+      if (search && search.trim()) {
+        params.set("search", search.trim())
+      }
+      if (sessionId && sessionId.trim()) {
+        params.set("session_id", sessionId.trim())
+      }
+      const data = await apiClient.get<{
+        projects: unknown[]
+        pagination: {
+          page: number
+          limit: number
+          total: number
+          has_more: boolean
+        }
+        route_summaries: Record<
+          string,
+          { total: number; deleted: number; added: number }
+        >
+      }>(`/projects/list-paginated?${params.toString()}`)
+      return {
+        success: true,
+        data: {
+          projects: data.projects.map(transformProject),
+          pagination: data.pagination,
+          route_summaries: data.route_summaries ?? {},
+        },
+        message: "Projects fetched successfully",
+      }
+    } catch (error) {
+      return {
+        success: false,
+        data: {
+          projects: [],
+          pagination: { page, limit, total: 0, has_more: false },
+          route_summaries: {},
+        },
+        message:
+          error instanceof Error ? error.message : "Failed to fetch projects",
+      }
+    }
+  },
+
   // Get all projects
   getAll: async (): Promise<ApiResponse<Project[]>> => {
     try {
@@ -79,9 +144,11 @@ export const projectsApi = {
   // Create new project
   create: async (
     projectData: Omit<Project, "id" | "createdAt" | "updatedAt">,
+    sessionId?: string | null,
   ): Promise<ApiResponse<Project>> => {
     try {
       const requestData = {
+        session_id: sessionId || undefined,
         project_name: projectData.name, // Backend API expects project_name
         jurisdiction_boundary_geojson: JSON.stringify(
           projectData.boundaryGeoJson,
@@ -319,6 +386,8 @@ export const projectsApi = {
   // Import project from zip file
   importProject: async (
     file: File,
+    sessionId: string,
+    forceReplace = false,
   ): Promise<
     ApiResponse<{
       new_project_id: number
@@ -333,7 +402,10 @@ export const projectsApi = {
         new_project_id: number
         routes_inserted: number
         routes_skipped_uuid_exists: number
-      }>("/import_project", file)
+      }>("/import_project", file, {
+        session_id: sessionId,
+        force_replace: String(forceReplace),
+      })
       return {
         success: true,
         data: {

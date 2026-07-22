@@ -25,7 +25,6 @@ from .create_engine import engine
 from pyproj import Geod
 from .compute_parent_sync_status import batch_update_parent_sync_statuses_sync
 from .firebase_logger import log_route_creation
-import threading
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -311,10 +310,10 @@ def save_route_segments_from_geojson(project_id, tag, feature_collection, count)
                 "is_segmented": True,
                 "segmentation_type": "distance",
             }
-            # Schedule logging in background thread (fire and forget)
-            def log_parent():
+            try:
                 log_route_creation(new_route_uuid, parent_metadata, None, False)
-            threading.Thread(target=log_parent, daemon=True).start()
+            except Exception:
+                logger.exception("Failed to log parent route copy creation: %s", new_route_uuid)
 
         for feature in feature_collection["features"]:
 
@@ -372,10 +371,10 @@ def save_route_segments_from_geojson(project_id, tag, feature_collection, count)
                 "segmentation_type": "distance",
                 "tag": tag,
             }
-            # Schedule logging in background thread (fire and forget)
-            def log_segment():
+            try:
                 log_route_creation(segment_uuid, segment_metadata, None, False)
-            threading.Thread(target=log_segment, daemon=True).start()
+            except Exception:
+                logger.exception("Failed to log segment creation: %s", segment_uuid)
         
         # Step 3: Batch update all parent routes' sync statuses at once
         batch_update_parent_sync_statuses_sync(project_id, conn)

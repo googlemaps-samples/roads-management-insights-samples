@@ -17,7 +17,7 @@
 Utility function to compute parent route sync status based on enabled children.
 """
 import logging
-from server.db.database import query_db
+from server.db.common import query_db
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 

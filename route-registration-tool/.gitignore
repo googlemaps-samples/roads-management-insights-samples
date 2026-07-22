@@ -5,7 +5,6 @@
 /ui/src/stores/deprecated-map-layers-store.ts
 /ui/src/stores/deprecated-drawing-store.ts
 /ui/src/components/map/deprecated-UnifiedProjectMap2.tsx
-/docs
 /server/example-road-with-arrows.json
 /ui/src/components/project-workspace/deprecated-RightFloatingPanel.tsx
 my_database.db

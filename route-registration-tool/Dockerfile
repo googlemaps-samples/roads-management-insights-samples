@@ -45,6 +45,9 @@ RUN poetry install --no-root --only main
 
 # Copy only the necessary backend files
 COPY server/ ./server/
+# Alembic migrations + config (required for startup migrations in Cloud Run)
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
 # COPY README.md ./ # If needed by poetry, but we used --no-root
 
 # Copy the built frontend from Stage 1

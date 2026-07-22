@@ -29,9 +29,11 @@ import React, { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
 import { PRIMARY_RED } from "../../constants/colors"
+import { useSessionId } from "../../hooks/use-session-id"
 import { Project } from "../../stores/project-workspace-store"
 import { clearAllLayers } from "../../utils/clear-all-layers"
 import { formatRelativeDate } from "../../utils/clipboard"
+import { buildSessionPath } from "../../utils/session"
 
 interface ProjectTableProps {
   projects: Project[]
@@ -39,6 +41,7 @@ interface ProjectTableProps {
 
 const ProjectTable: React.FC<ProjectTableProps> = ({ projects }) => {
   const navigate = useNavigate()
+  const sessionId = useSessionId()
   const [searchQuery, setSearchQuery] = useState("")
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const [_selectedProjectId, setSelectedProjectId] = useState<string | null>(
@@ -63,7 +66,11 @@ const ProjectTable: React.FC<ProjectTableProps> = ({ projects }) => {
   const handleRowClick = (projectId: string) => {
     // Clear all layers before navigating to a project
     clearAllLayers()
-    navigate(`/project/${projectId}`)
+    navigate(
+      sessionId
+        ? buildSessionPath(sessionId, `/project/${projectId}`)
+        : `/project/${projectId}`,
+    )
   }
 
   const handleMenuOpen = (

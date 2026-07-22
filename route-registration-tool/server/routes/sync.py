@@ -15,7 +15,7 @@
 
 import logging
 from fastapi import APIRouter, HTTPException
-from server.db.database import query_db
+from server.db.common import query_db
 from typing import Dict
 from pydantic import BaseModel
 from datetime import datetime

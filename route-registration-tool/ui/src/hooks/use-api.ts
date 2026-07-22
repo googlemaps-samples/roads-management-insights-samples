@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 import {
   useInfiniteQuery,
   useMutation,
@@ -23,13 +22,14 @@ import { useMemo } from "react"
 import { RoadPriority } from "../constants/road-priorities"
 import {
   bigqueryApi,
+  clientConfigApi,
   googleRoutesApi,
   placesApi,
   polygonsApi,
   projectsApi,
-  pubsubApi,
   roadsApi,
   routesApi,
+  sessionsApi,
   usersApi,
 } from "../data/api"
 import { syncApi } from "../data/api/sync-api"
@@ -45,11 +45,14 @@ import { UserPreferencesUpdate } from "../types/user"
 import { getGoogleMapsApiKey } from "../utils/api-helpers"
 import { captureCompressedMapSnapshot } from "../utils/map-snapshot"
 import { toast } from "../utils/toast"
+import { useSessionId } from "./use-session-id"
 
 // Query keys
 export const queryKeys = {
   projects: ["projects"] as const,
   project: (id: string) => ["projects", id] as const,
+  linkedSessions: (sessionId: string) =>
+    ["sessions", sessionId, "linked"] as const,
   gcpProjects: ["gcpProjects"] as const,
   routes: (projectId: string) => ["routes", projectId] as const,
   route: (id: string) => ["route", id] as const,
@@ -68,6 +71,69 @@ export const queryKeys = {
   placeDetails: (placeId: string) => ["places", "details", placeId] as const,
   bigqueryDatasets: (projectId: string) =>
     ["bigquery", "datasets", projectId] as const,
+  clientConfig: ["clientConfig"] as const,
+}
+
+export const useLinkedSessions = (sessionId: string | null) => {
+  return useQuery({
+    queryKey: sessionId
+      ? queryKeys.linkedSessions(sessionId)
+      : ["sessions", "none"],
+    queryFn: async () => {
+      if (!sessionId) throw new Error("sessionId is required")
+      // Ensure exists (best-effort), then fetch links.
+      await sessionsApi.ensure(sessionId)
+      const response = await sessionsApi.getLinked(sessionId)
+      if (!response.success) throw new Error(response.message)
+      return response.data.linked_session_ids
+    },
+    enabled: !!sessionId,
+    staleTime: 30 * 1000,
+  })
+}
+
+export const useLinkSession = () => {
+  const queryClient = useQueryClient()
+  const sessionId = useSessionId()
+  return useMutation({
+    mutationFn: async (otherSessionId: string) => {
+      if (!sessionId) throw new Error("No active session")
+      const check = await sessionsApi.get(otherSessionId)
+      if (!check.success) throw new Error(check.message || "Session not found")
+      const response = await sessionsApi.link(sessionId, otherSessionId)
+      if (!response.success) throw new Error(response.message)
+      return true
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.linkedSessions(sessionId),
+        })
+        queryClient.invalidateQueries({ queryKey: ["projects-infinite"] })
+      }
+    },
+  })
+}
+
+export const useUnlinkSession = () => {
+  const queryClient = useQueryClient()
+  const sessionId = useSessionId()
+  return useMutation({
+    mutationFn: async (otherSessionId: string) => {
+      if (!sessionId) throw new Error("No active session")
+      const response = await sessionsApi.unlink(sessionId, otherSessionId)
+      if (!response.success) throw new Error(response.message)
+      return true
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.linkedSessions(sessionId),
+        })
+        queryClient.invalidateQueries({ queryKey: ["projects-infinite"] })
+      }
+    },
+  })
 }
 
 // Projects hooks
@@ -81,6 +147,35 @@ export const useProjects = () => {
       return response.data
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+}
+
+export const useClientConfig = () => {
+  return useQuery({
+    queryKey: queryKeys.clientConfig,
+    queryFn: () => clientConfigApi.get(),
+    staleTime: 60 * 60 * 1000,
+  })
+}
+
+export const useInfiniteProjects = (searchQuery: string, limit = 24) => {
+  const sessionId = useSessionId()
+  return useInfiniteQuery({
+    queryKey: ["projects-infinite", sessionId, searchQuery, limit],
+    queryFn: async ({ pageParam = 1 }) => {
+      const response = await projectsApi.getPaginated(
+        pageParam,
+        limit,
+        searchQuery || undefined,
+        sessionId ?? undefined,
+      )
+      if (!response.success) throw new Error(response.message)
+      return response.data
+    },
+    getNextPageParam: (lastPage) =>
+      lastPage.pagination.has_more ? lastPage.pagination.page + 1 : undefined,
+    staleTime: 5 * 60 * 1000,
+    initialPageParam: 1,
   })
 }
 
@@ -202,17 +297,19 @@ export const useProject = (projectId: string) => {
 //used
 export const useCreateProject = () => {
   const queryClient = useQueryClient()
+  const sessionId = useSessionId()
 
   return useMutation({
     mutationFn: async (
       projectData: Omit<Project, "id" | "createdAt" | "updatedAt">,
     ) => {
-      const response = await projectsApi.create(projectData)
+      const response = await projectsApi.create(projectData, sessionId)
       if (!response.success) throw new Error(response.message)
       return response.data
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects })
+      queryClient.invalidateQueries({ queryKey: ["projects-infinite"] })
       queryClient.invalidateQueries({ queryKey: queryKeys.gcpProjects })
     },
   })
@@ -235,6 +332,7 @@ export const useUpdateProject = () => {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects })
+      queryClient.invalidateQueries({ queryKey: ["projects-infinite"] })
       queryClient.invalidateQueries({
         queryKey: queryKeys.project(variables.projectId),
       })
@@ -253,6 +351,7 @@ export const useDeleteProject = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects })
+      queryClient.invalidateQueries({ queryKey: ["projects-infinite"] })
       queryClient.invalidateQueries({ queryKey: queryKeys.gcpProjects })
     },
   })
@@ -2095,51 +2194,6 @@ export const useBatchFetchRoads = () => {
       const response = await roadsApi.batchFetch(roadIds, projectId)
       if (!response.success) throw new Error(response.message)
       return response.data
-    },
-  })
-}
-
-// PubSub Listener hooks
-export const useStartPubSubListener = () => {
-  return useMutation({
-    mutationFn: async (config: {
-      gcp_project_id: string
-      project_db_id: number
-      gcp_project_number: string
-    }) => {
-      const response = await pubsubApi.startListener(config)
-      if (!response.success) {
-        // Check if it's already running (400 error)
-        if (response.message?.includes("already running")) {
-          console.log("ℹ️ PubSub listener is already active")
-          return response.data
-        }
-        throw new Error(response.message)
-      }
-      return response.data
-    },
-    onError: (error) => {
-      console.error("❌ Failed to start PubSub listener:", error)
-    },
-  })
-}
-
-export const useStopPubSubListener = () => {
-  return useMutation({
-    mutationFn: async () => {
-      const response = await pubsubApi.stopListener()
-      if (!response.success) {
-        // Don't throw error for "not running" status - just log it
-        if (response.message?.includes("not currently running")) {
-          console.log("ℹ️ PubSub listener was not running")
-          return response.data
-        }
-        throw new Error(response.message)
-      }
-      return response.data
-    },
-    onError: (error) => {
-      console.error("❌ Failed to stop PubSub listener:", error)
     },
   })
 }

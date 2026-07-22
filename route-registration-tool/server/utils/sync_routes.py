@@ -289,7 +289,9 @@ async def fetch_single_route(project_uuid: str, uuid):
     try:
         async with async_engine.begin() as conn:
             query = text("""SELECT uuid, route_name, origin, destination, waypoints, sync_status, length, tag, route_type
-            FROM routes WHERE uuid = :uuid AND project_uuid = :project_uuid AND is_enabled = 1 AND has_children = 0
+            FROM routes WHERE uuid = :uuid AND project_uuid = :project_uuid
+            AND COALESCE(is_enabled, FALSE) = TRUE
+            AND COALESCE(has_children, FALSE) = FALSE
             AND deleted_at IS NULL
             """)
             result = await conn.execute(
@@ -315,7 +317,9 @@ async def fetch_all_project_routes(project_uuid: str, tag: Optional[str] = None)
             SELECT uuid, route_name, origin, destination, waypoints, length, tag,
                    route_type, sync_status, deleted_at, project_uuid
             FROM routes
-            WHERE is_enabled = 1 AND has_children = 0 AND project_uuid = :project_uuid
+            WHERE COALESCE(is_enabled, FALSE) = TRUE
+              AND COALESCE(has_children, FALSE) = FALSE
+              AND project_uuid = :project_uuid
         """
         if tag:
             query_str += " AND tag = :tag"
@@ -347,7 +351,9 @@ async def fetch_all_project_routes_by_project_id(
             SELECT uuid, route_name, origin, destination, waypoints, length, tag,
                    route_type, sync_status, deleted_at, project_uuid
             FROM routes
-            WHERE is_enabled = 1 AND has_children = 0 AND project_id = :project_id
+            WHERE COALESCE(is_enabled, FALSE) = TRUE
+              AND COALESCE(has_children, FALSE) = FALSE
+              AND project_id = :project_id
         """
         if tag:
             query_str += " AND tag = :tag"
@@ -1270,27 +1276,23 @@ async def save_routes_to_db(routes_data, db_project_id, project_uuid: str, bq_up
                 """)
                 await conn.execute(query, insert_values)
 
-            # Log each route creation to Firestore asynchronously (non-blocking)
-            # Use threading to run logging in background without blocking
-            import threading
+            # Log each route creation to Firestore.
             from server.utils.firebase_logger import log_route_creation
-
-            def log_routes_background():
-                """Background thread function to log routes without blocking"""
-                for route_data in insert_values:
-                    route_metadata = {
-                        "project_id": route_data["project_id"],
-                        "route_name": route_data["route_name"],
-                        "route_type": route_data.get("route_type", "Existing"),
-                        "tag": route_data.get("tag"),
-                        "distance": route_data.get("length"),  # Distance in km
-                        "sync_status": route_data.get("sync_status", "synced"),
-                    }
+            for route_data in insert_values:
+                route_metadata = {
+                    "project_id": route_data["project_id"],
+                    "route_name": route_data["route_name"],
+                    "route_type": route_data.get("route_type", "Existing"),
+                    "tag": route_data.get("tag"),
+                    "distance": route_data.get("length"),  # Distance in km
+                    "sync_status": route_data.get("sync_status", "synced"),
+                }
+                try:
                     log_route_creation(route_data["uuid"], route_metadata)
-
-            # Start background thread for logging (fire and forget)
-            logging_thread = threading.Thread(target=log_routes_background, daemon=True)
-            logging_thread.start()
+                except Exception:
+                    logger.exception(
+                        "Failed to log route creation for %s", route_data.get("uuid")
+                    )
 
         except Exception as e:
             logger.error(f"Bulk insert failed: {e}")

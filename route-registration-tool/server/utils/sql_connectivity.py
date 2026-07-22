@@ -20,7 +20,7 @@ Uses pure SQL queries with road_spatial_index for fast, accurate connectivity ch
 
 import logging
 from typing import List, Dict, Optional, Tuple
-from server.db.database import query_db
+from server.db.common import query_db
 
 logger = logging.getLogger(__name__)
 

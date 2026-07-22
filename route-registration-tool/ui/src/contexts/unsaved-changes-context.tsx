@@ -62,7 +62,7 @@ const UnsavedChangesProviderInner: React.FC<{ children: React.ReactNode }> = ({
   const navigateWithCheck = useCallback(
     (path: string) => {
       // Always clear layers when navigating to dashboard
-      if (path === "/dashboard") {
+      if (path === "/dashboard" || path.endsWith("/dashboard")) {
         if (hasUnsavedChanges()) {
           setPendingPath(path)
           setDialogOpen(true)

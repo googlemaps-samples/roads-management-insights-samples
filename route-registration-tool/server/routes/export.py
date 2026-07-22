@@ -71,7 +71,9 @@ def export_project_with_routes_as_bytes(project_id: int) -> io.BytesIO:
         "routes": routes_list
     }
 
-    json_bytes = json.dumps(export_json, indent=4).encode("utf-8")
+    # Postgres returns real datetime objects for timestamp columns; JSON
+    # serialization needs a fallback (default=str keeps it deterministic).
+    json_bytes = json.dumps(export_json, indent=4, default=str).encode("utf-8")
 
     mem_file = io.BytesIO()
     with zipfile.ZipFile(mem_file, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:

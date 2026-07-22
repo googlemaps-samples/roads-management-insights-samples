@@ -14,7 +14,7 @@
 
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from server.utils.get_routes_status import RouteUpdater
 from server.utils.check_routes_status import RouteStatusChecker
@@ -32,16 +32,9 @@ def get_ws_manager():
     except (ImportError, AttributeError):
         return None
 
-# Store active validation checkers by project_number
-active_checkers = {}
-
 # ---- Data model for request body ----
 class RoutesStatusConfig(BaseModel):
     project_number: str
-
-class ValidationCheckerConfig(BaseModel):
-    project_number: str
-    interval_seconds: int = 20
 
 @router.post("/get-routes-status")
 async def get_routes_status(config: RoutesStatusConfig):
@@ -54,46 +47,8 @@ async def get_routes_status(config: RoutesStatusConfig):
 async def check_routes_status(config: RoutesStatusConfig):
     logger.info("Checking routes status")
     checker = RouteStatusChecker(project_number=config.project_number)
-    checker.run()
+    await checker.run()
     return {"message": "Routes status checked"}
-
-@router.post("/start-validation-checker")
-async def start_validation_checker(config: ValidationCheckerConfig):
-    """Start continuous validation status checking for routes with STATE_VALIDATING status."""
-    project_number = config.project_number
-    
-    # Stop existing checker if running
-    if project_number in active_checkers:
-        logger.info(f"Stopping existing validation checker for project {project_number}")
-        active_checkers[project_number].stop_validation_checker()
-    
-    # Create and start new checker
-    logger.info(f"Starting validation checker for project {project_number} (interval: {config.interval_seconds}s)")
-    checker = RouteStatusChecker(project_number=project_number)
-    checker.start_validation_checker(interval_seconds=config.interval_seconds)
-    active_checkers[project_number] = checker
-    
-    return {
-        "message": f"Validation checker started for project {project_number}",
-        "interval_seconds": config.interval_seconds
-    }
-
-@router.post("/stop-validation-checker")
-async def stop_validation_checker(config: RoutesStatusConfig):
-    """Stop continuous validation status checking for a project."""
-    project_number = config.project_number
-    
-    if project_number not in active_checkers:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No active validation checker found for project {project_number}"
-        )
-    
-    logger.info(f"Stopping validation checker for project {project_number}")
-    active_checkers[project_number].stop_validation_checker()
-    del active_checkers[project_number]
-    
-    return {"message": f"Validation checker stopped for project {project_number}"}
 
 @router.get("/websocket-connections")
 async def get_websocket_connections():

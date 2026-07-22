@@ -281,7 +281,7 @@ async def find_next_road(conn, current_road: Dict, db_project_id: int, priority_
         AND deleted_at IS NULL
         AND priority IN :priorities
         AND id NOT IN :exclude_ids
-        AND is_enabled = 1
+        AND COALESCE(is_enabled, FALSE) = TRUE
         AND (
             (ABS(start_lat - :target_lat) < :eps AND ABS(start_lng - :target_lng) < :eps) OR
             (ABS(end_lat - :target_lat) < :eps AND ABS(end_lng - :target_lng) < :eps)

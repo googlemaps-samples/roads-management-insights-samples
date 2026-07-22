@@ -17,7 +17,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from server.utils.project_list import list_accessible_gcp_projects
 from server.utils.feature_flags import ENABLE_MULTITENANT
-from server.db.database import query_db
+from server.db.common import query_db
 
 router = APIRouter()
 logger = logging.getLogger("get_projects_route")

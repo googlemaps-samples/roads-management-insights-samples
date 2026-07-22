@@ -23,6 +23,8 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.polygon import orient
 import logging
 
+from .auth import get_oauth_token, get_adc_project_id
+
 # -------------------------------------------------
 # Logging config
 logging.basicConfig(
@@ -34,11 +36,7 @@ logging.basicConfig(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-API_KEY = os.getenv('GOOGLE_API_KEY')
 FETCH_ROADS_URL = os.getenv("POLYGON_ROADS_API_URL")
-
-if not API_KEY:
-    raise ValueError("GOOGLE_API_KEY not found in .env file.")
 
 # Config
 PROXIMITY_TOLERANCE_METERS = 5       # Max distance to consider a point "touching" the route
@@ -67,10 +65,15 @@ async def google_coords_to_shapely(google_coords_list):
     return [(p['location']['longitude'], p['location']['latitude']) for p in google_coords_list]
 
 # Fetch road data asynchronously
-async def fetch_roads_from_api(polygon_geometry, api_key):
+async def fetch_roads_from_api(polygon_geometry):
     """
     Fetches all road segments that fall within the provided polygon.
     Handles pagination (nextPageToken) to ensure all roads are retrieved.
+
+    Authenticates with Application Default Credentials (service account on
+    Cloud Run, or `gcloud auth application-default login` locally). Quota is
+    attributed to the ADC principal's home project — the same project used
+    by the GCP project-list lookup.
     """
     polygon_geometry = orient(polygon_geometry, sign=1)
 
@@ -79,8 +82,10 @@ async def fetch_roads_from_api(polygon_geometry, api_key):
     all_roads = []
     page_token = None
 
+    token = await get_oauth_token()
     headers = {
-        'X-Goog-Api-Key': api_key,
+        'Authorization': f'Bearer {token}',
+        'X-Goog-User-Project': get_adc_project_id(),
         'Content-Type': 'application/json'
     }
 
@@ -130,7 +135,7 @@ async def find_intersection_points(encoded_polyline_str):
     search_polygon = shapely.buffer(original_route_geom, 0.001)
 
     # Fetch all roads within the search polygon
-    fetched_roads_response = await fetch_roads_from_api(search_polygon, API_KEY)
+    fetched_roads_response = await fetch_roads_from_api(search_polygon)
     logging.info(f"Fetched {len(fetched_roads_response)} raw road segments.")
 
     # Create exclusion buffer for main route segments

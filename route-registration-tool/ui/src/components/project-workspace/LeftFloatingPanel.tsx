@@ -100,11 +100,13 @@ import type {
   RouteSegment,
   Route as RouteType,
 } from "../../stores/project-workspace-store"
+import { useSessionId } from "../../hooks/use-session-id"
 import { formatDistance, useDistanceUnit } from "../../utils/distance-utils"
 import {
   calculateRouteLengthFromPolyline,
   decodePolylineToGeoJSON,
 } from "../../utils/polyline-decoder"
+import { buildSessionPath } from "../../utils/session"
 import { toast } from "../../utils/toast"
 import {
   pxToMuiSpacing,
@@ -617,6 +619,7 @@ const SegmentsList: React.FC<SegmentsListProps> = ({
 
 const RoutesPanel: React.FC<RoutesPanelProps> = () => {
   const { navigateWithCheck } = useUnsavedChangesNavigation()
+  const sessionId = useSessionId()
   const typo = useResponsiveTypography()
   const setSelectedRoutePanelVisible = useProjectWorkspaceStore(
     (state) => state.setSelectedRoutePanelVisible,
@@ -3233,7 +3236,13 @@ const RoutesPanel: React.FC<RoutesPanelProps> = () => {
                 </Typography>
                 <IconButton
                   size="small"
-                  onClick={() => navigateWithCheck("/dashboard")}
+                  onClick={() =>
+                    navigateWithCheck(
+                      sessionId
+                        ? buildSessionPath(sessionId, "/dashboard")
+                        : "/dashboard",
+                    )
+                  }
                   sx={{
                     minWidth: 40,
                     minHeight: 40,

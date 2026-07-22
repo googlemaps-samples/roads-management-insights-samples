@@ -19,7 +19,12 @@ import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
-from server.db.database import query_db
+from server.db.common import (
+    SQL_USERS_PREFERENCES_CREATE_DEFAULT,
+    SQL_USERS_PREFERENCES_GET,
+    query_db,
+    sql_users_update_set_clause,
+)
 
 # Setup logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -80,6 +85,17 @@ def row_to_preferences_out(row) -> UserPreferencesOut:
         # Column doesn't exist (old database), default to sync_status
         route_color_mode = "sync_status"
     
+    def _to_optional_string(v) -> str | None:
+        # DB drivers may return real datetime objects for TIMESTAMP columns.
+        if v is None:
+            return None
+        # Keep typing local to avoid importing datetime at module top.
+        import datetime as _dt
+
+        if isinstance(v, _dt.datetime):
+            return v.isoformat()
+        return str(v)
+
     return UserPreferencesOut(
         id=row["id"],
         distance_unit=row["distance_unit"],
@@ -87,8 +103,8 @@ def row_to_preferences_out(row) -> UserPreferencesOut:
         show_tooltip=show_tooltip,
         show_instructions=show_instructions,
         route_color_mode=route_color_mode,
-        created_at=row["created_at"],
-        updated_at=row["updated_at"]
+        created_at=_to_optional_string(row["created_at"]),
+        updated_at=_to_optional_string(row["updated_at"]),
     )
 
 # --------------------------
@@ -102,25 +118,15 @@ async def get_user_preferences():
         logger.info("Fetching user preferences")
         
         # Get the default user (id=1)
-        query = """
-        SELECT id, distance_unit, google_cloud_account, show_tooltip, route_color_mode, show_instructions, created_at, updated_at
-        FROM users
-        WHERE id = 1
-        """
-        
-        row = await query_db(query, (), one=True)
+        row = await query_db(SQL_USERS_PREFERENCES_GET, (), one=True)
         
         if not row:
             # Create default user if it doesn't exist
             logger.info("Default user not found, creating...")
-            create_query = """
-            INSERT INTO users (id, distance_unit, google_cloud_account, show_tooltip, show_instructions,route_color_mode)
-            VALUES (1, 'km', NULL, 1, 1,'sync_status')
-            """
-            await query_db(create_query, (), commit=True)
+            await query_db(SQL_USERS_PREFERENCES_CREATE_DEFAULT, (), commit=True)
             
             # Fetch the newly created user
-            row = await query_db(query, (), one=True)
+            row = await query_db(SQL_USERS_PREFERENCES_GET, (), one=True)
         
         preferences = row_to_preferences_out(row)
         logger.info(f"Found user preferences: distance_unit={preferences.distance_unit}")
@@ -128,6 +134,7 @@ async def get_user_preferences():
         return preferences
         
     except Exception as e:
+        logger.exception("Error fetching user preferences")
         logger.error(f"Error fetching user preferences: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch user preferences")
 
@@ -185,11 +192,7 @@ async def update_user_preferences(preferences_data: UserPreferencesUpdate):
         update_fields.append("updated_at = CURRENT_TIMESTAMP")
         update_values.append(1)  # user id
         
-        query = f"""
-        UPDATE users 
-        SET {', '.join(update_fields)}
-        WHERE id = ?
-        """
+        query = sql_users_update_set_clause(", ".join(update_fields))
         
         await query_db(query, tuple(update_values), commit=True)
         

@@ -37,7 +37,7 @@ const FloatingSheet: React.FC<FloatingSheetProps> = ({
 }) => {
   return (
     <Box
-      className={`fixed left-0 top-16 h-[calc(100vh-4rem)] bg-white flex transition-all duration-300 ${className || ""}`}
+      className={`fixed left-0 top-[var(--app-nav-height,4rem)] h-[calc(100vh-var(--app-nav-height,4rem))] bg-white flex transition-all duration-300 ${className || ""}`}
       style={{
         width: `${width}px`,
         fontFamily: "'Google Sans', 'Roboto', sans-serif",

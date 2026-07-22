@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-from server.db.database import query_db
+from server.db.common import query_db
 from server.utils.firebase_logger import log_route_creation_async
 import polyline
 
@@ -289,6 +289,13 @@ async def get_child_routes(parent_route_uuid: str) -> List[RouteMetadataOut]:
 
 def row_to_route_metadata(row) -> RouteMetadataOut:
     """Convert database row to RouteMetadataOut model (no roads)"""
+    def _to_optional_string(v):
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return str(v)
+
     return RouteMetadataOut(
         uuid=row["uuid"],
         project_id=row["project_id"],
@@ -310,13 +317,23 @@ def row_to_route_metadata(row) -> RouteMetadataOut:
         is_enabled=bool(row["is_enabled"]),
         tag=row["tag"] if "tag" in row.keys() else None,
         segment_order=row["segment_order"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        deleted_at=row["deleted_at"]
+        created_at=_to_optional_string(row["created_at"]),
+        updated_at=_to_optional_string(row["updated_at"]),
+        deleted_at=_to_optional_string(row["deleted_at"])
     )
 
-def row_to_route_out(row, segments: List[RouteMetadataOut] = []) -> RouteOut:
+def row_to_route_out(row, segments: Optional[List[RouteMetadataOut]] = None) -> RouteOut:
     """Convert database row to RouteOut model (with segments, no roads)"""
+    if segments is None:
+        segments = []
+
+    def _to_optional_string(v):
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return str(v)
+
     # Parse original_route_geo_json if it's a string
     original_route_geo_json = row["original_route_geo_json"] if "original_route_geo_json" in row.keys() else None
     if original_route_geo_json and isinstance(original_route_geo_json, str):
@@ -349,9 +366,9 @@ def row_to_route_out(row, segments: List[RouteMetadataOut] = []) -> RouteOut:
         segments=segments,  # Include child route segments
         original_route_geo_json=original_route_geo_json,  # Include original route GeoJSON
         match_percentage=row["match_percentage"] if "match_percentage" in row.keys() else None,  # Include match percentage
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        deleted_at=row["deleted_at"],
+        created_at=_to_optional_string(row["created_at"]),
+        updated_at=_to_optional_string(row["updated_at"]),
+        deleted_at=_to_optional_string(row["deleted_at"]),
         routes_status=row["routes_status"]
     )
 
@@ -1415,14 +1432,14 @@ async def get_project_tags(project_id: int):
         query = """
         SELECT 
             tag,
-            COUNT(CASE WHEN is_segmented = 0 AND parent_route_id IS NULL AND deleted_at IS NULL THEN 1 END) AS non_segmented_count,
-            COUNT(CASE WHEN parent_route_id IS NOT NULL AND deleted_at IS NULL THEN 1 END) AS segment_count,
-            COUNT(CASE WHEN parent_route_id IS NULL AND deleted_at IS NULL THEN 1 END) AS route_count
+            COUNT(CASE WHEN COALESCE(is_segmented, FALSE) = FALSE AND parent_route_id IS NULL THEN 1 END) AS non_segmented_count,
+            COUNT(CASE WHEN parent_route_id IS NOT NULL THEN 1 END) AS segment_count,
+            COUNT(CASE WHEN parent_route_id IS NULL THEN 1 END) AS route_count
         FROM routes
         WHERE project_id = ?
         AND deleted_at IS NULL
         GROUP BY tag
-        ORDER BY tag COLLATE NOCASE ASC
+        ORDER BY LOWER(COALESCE(tag, '')) ASC
         """
         rows = await query_db(query, (project_id,))
         
@@ -1471,6 +1488,7 @@ async def get_project_tags(project_id: int):
             }
         }
     except Exception as e:
+        logger.exception("Error fetching tags for project %s", project_id)
         logger.error(f"Error fetching tags for project {project_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch tags")
 

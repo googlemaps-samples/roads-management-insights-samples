@@ -17,10 +17,11 @@ import logging
 import json
 import math
 from typing import List
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from shapely.geometry import Polygon, shape
-from server.db.database import query_db
+from server.db.common import query_db, SQL_TILES_CANDIDATE_ROADS, SQL_TILES_CANDIDATE_ROUTES
 import polyline
 
 
@@ -89,19 +90,8 @@ async def get_roads_tile(
         # This is a performance optimization - we'll do precise intersection check after
         # Expand by a small margin to ensure we don't miss roads near tile edges
         margin = 0.001  # ~100m at equator
-        query = """
-        SELECT id, polyline, length, is_enabled, center_lat, center_lng, name , priority
-        FROM roads
-        WHERE project_id = ?
-          AND deleted_at IS NULL
-          AND center_lat BETWEEN ? AND ?
-          AND center_lng BETWEEN ? AND ?
-          AND is_enabled = 1
-        ORDER BY length DESC
-        """
-
         rows = await query_db(
-            query,
+            SQL_TILES_CANDIDATE_ROADS,
             (
                 project_id,
                 lat_min - margin,
@@ -110,8 +100,10 @@ async def get_roads_tile(
                 lon_max + margin,
             )
         )
+        logger.debug("[TILE REQUEST] candidate roads=%s", len(rows))
         features = []
 
+        skipped = 0
         for r in rows:
             try:
                 geom = json.loads(r["polyline"])
@@ -182,39 +174,81 @@ async def get_routes_tile(
     try:
         logger.info(f"[ROUTE TILE REQUEST] z={z}, x={x}, y={y}, project_id={project_id}")
 
+        def _to_json_safe(v):
+            if v is None:
+                return None
+            if isinstance(v, datetime):
+                return v.isoformat()
+            return v
+
+        def _normalize_coords_to_geojson(
+            coords: list,
+            *,
+            lon_min: float,
+            lon_max: float,
+            lat_min: float,
+            lat_max: float,
+        ) -> list:
+            """
+            Ensure coordinates are in GeoJSON order [lng, lat].
+            We use the tile bbox to disambiguate [lat,lng] vs [lng,lat] when both
+            values are within [-90, 90] (common for many regions).
+            """
+            if not coords:
+                return coords
+
+            # Compute bbox overlap for both interpretations:
+            # - as_is: (x=a=lon, y=b=lat)
+            # - swapped: (x=b=lon, y=a=lat)
+            min_a = min_b = float("inf")
+            max_a = max_b = float("-inf")
+            for c in coords:
+                if not (isinstance(c, (list, tuple)) and len(c) == 2):
+                    continue
+                try:
+                    a = float(c[0])
+                    b = float(c[1])
+                except Exception:
+                    continue
+                min_a = min(min_a, a)
+                max_a = max(max_a, a)
+                min_b = min(min_b, b)
+                max_b = max(max_b, b)
+
+            if min_a == float("inf") or min_b == float("inf"):
+                return coords
+
+            # as_is bbox = [min_a,max_a]x[min_b,max_b]
+            as_is_overlaps = not (
+                max_a < lon_min or min_a > lon_max or max_b < lat_min or min_b > lat_max
+            )
+            # swapped bbox = [min_b,max_b]x[min_a,max_a]
+            swapped_overlaps = not (
+                max_b < lon_min or min_b > lon_max or max_a < lat_min or min_a > lat_max
+            )
+
+            if swapped_overlaps and not as_is_overlaps:
+                return [[c[1], c[0]] for c in coords if isinstance(c, (list, tuple)) and len(c) == 2]
+            return coords
+
         # Compute tile bounds
         lat_min, lon_min = num2deg(x, y + 1, z)
         lat_max, lon_max = num2deg(x + 1, y, z)
 
-        # Create tile bounds polygon for spatial intersection check
-        tile_bounds_polygon = Polygon([
-            [lon_min, lat_min],
-            [lon_max, lat_min],
-            [lon_max, lat_max],
-            [lon_min, lat_max],
-            [lon_min, lat_min]
-        ])
+        tile_bounds_polygon = Polygon(
+            [
+                [lon_min, lat_min],
+                [lon_max, lat_min],
+                [lon_max, lat_max],
+                [lon_min, lat_max],
+                [lon_min, lat_min],
+            ]
+        )
 
         # First-pass filter: Use bounding box to get candidate routes
         margin = 0.001  # ~100m at equator
-        query = """
-        SELECT uuid, route_name, encoded_polyline, sync_status, is_enabled,
-               origin, destination, waypoints, length, start_lat, start_lng, end_lat, end_lng,
-               tag, created_at, updated_at, project_id, route_type , current_duration_seconds, static_duration_seconds , traffic_status , latest_data_update_time , synced_at
-        FROM routes
-        WHERE project_id = ?
-          AND deleted_at IS NULL
-          AND encoded_polyline IS NOT NULL
-          AND min_lat <= ?
-          AND max_lat >= ?
-          AND min_lng <= ?
-          AND max_lng >= ? 
-          AND parent_route_id IS NULL
-        ORDER BY length DESC
-        """
-
         rows = await query_db(
-            query,
+            SQL_TILES_CANDIDATE_ROUTES,
             (
                 project_id,
                 lat_max + margin,
@@ -223,58 +257,92 @@ async def get_routes_tile(
                 lon_min - margin,
             )
         )
+        # `query_db` returns QueryRow adapters; avoid printing raw objects.
+        logger.debug("[ROUTE TILE REQUEST] candidate rows=%s", len(rows))
+
+        def _try_decode_google_polyline(s: str) -> list[list[float]] | None:
+            # polyline.decode returns [(lat,lng), ...]
+            for prec in (5, 6, 7):
+                try:
+                    pts = polyline.decode(s, precision=prec) if prec != 5 else polyline.decode(s)
+                    if pts:
+                        return [[float(lng), float(lat)] for (lat, lng) in pts]
+                except Exception:
+                    continue
+            return None
+
+        def _decode_geometry_from_encoded_polyline(raw) -> tuple[dict | None, str]:
+            """
+            Returns (geom, path) where path indicates how we decoded:
+            - json-geojson
+            - json-coords
+            - google-polyline
+            - unsupported
+            """
+            if raw is None:
+                return None, "unsupported"
+            if isinstance(raw, dict):
+                if raw.get("type") and raw.get("coordinates"):
+                    return {"type": raw.get("type"), "coordinates": raw.get("coordinates")}, "json-geojson"
+                return None, "unsupported"
+            if isinstance(raw, list):
+                return {"type": "LineString", "coordinates": raw}, "json-coords"
+            if isinstance(raw, str):
+                s = raw.strip()
+                if not s:
+                    return None, "unsupported"
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict) and obj.get("coordinates"):
+                        return {"type": obj.get("type", "LineString"), "coordinates": obj.get("coordinates")}, "json-geojson"
+                    if isinstance(obj, list):
+                        return {"type": "LineString", "coordinates": obj}, "json-coords"
+                except Exception:
+                    pass
+                coords = _try_decode_google_polyline(s)
+                if coords:
+                    return {"type": "LineString", "coordinates": coords}, "google-polyline"
+                return None, "unsupported"
+            return None, "unsupported"
+
         features = []
+        skipped = 0
+        # Keep `skipped` for lightweight debugging in headers.
 
         for r in rows:
             try:
-                # Parse encoded polyline
-                polyline_str = r["encoded_polyline"]
-                
-                # Handle both JSON string and direct format
-                if isinstance(polyline_str, str):
-                    try:
-                        polyline_data = json.loads(polyline_str)
-                    except json.JSONDecodeError:
-                        # If not JSON, decode as Google-encoded polyline
-                        coords_decoded = polyline.decode(polyline_str)
-                        polyline_data = {
-                            "type": "LineString",
-                            "coordinates": [[lng, lat] for lat, lng in coords_decoded]
-                        }
-                        # logger.info(f"Decoded Google polyline for route {r['uuid']}")
-                else:
-                    polyline_data = polyline_str
-
-                # Extract coordinates based on format
-                if isinstance(polyline_data, dict):
-                    if 'coordinates' in polyline_data:
-                        coords = polyline_data['coordinates']
-                        geom_type = polyline_data.get('type', 'LineString')
-                    else:
-                        continue
-                elif isinstance(polyline_data, list):
-                    coords = polyline_data
-                    geom_type = 'LineString'
-                else:
+                raw = r["encoded_polyline"]
+                geom, path = _decode_geometry_from_encoded_polyline(raw)
+                if geom is None:
+                    skipped += 1
                     continue
 
-                if not coords or len(coords) < 2:
+                coords = geom.get("coordinates")
+                if not isinstance(coords, list) or len(coords) < 2:
+                    skipped += 1
                     continue
 
-                # Create geometry object
-                geom = {
-                    "type": geom_type,
-                    "coordinates": coords
-                }
+                coords = _normalize_coords_to_geojson(
+                    coords,
+                    lon_min=lon_min,
+                    lon_max=lon_max,
+                    lat_min=lat_min,
+                    lat_max=lat_max,
+                )
+                geom = {"type": "LineString", "coordinates": coords}
 
-                # Create Shapely LineString from route geometry
-                route_linestring = shape(geom)
-
-                # Check if route actually intersects the tile bounds
-                if not tile_bounds_polygon.intersects(route_linestring):
+                try:
+                    route_linestring = shape(geom)
+                    intersects = tile_bounds_polygon.intersects(route_linestring)
+                except Exception as ie:
+                    intersects = False
+                    skipped += 1
                     continue
 
-                # Route intersects tile - include it
+                if not intersects:
+                    skipped += 1
+                    continue
+
                 status = r["sync_status"] or "unsynced"
                 is_enabled = r["is_enabled"]
                 
@@ -312,8 +380,8 @@ async def get_routes_tile(
                         "distance": distance,  # Add distance (same as length)
                         "duration": duration,  # Duration (None if not available)
                         "tag": r["tag"] if r["tag"] is not None else None,
-                        "created_at": r["created_at"],
-                        "updated_at": r["updated_at"],
+                        "created_at": _to_json_safe(r["created_at"]),
+                        "updated_at": _to_json_safe(r["updated_at"]),
                         "project_id": r["project_id"],
                         "type": r["route_type"] if r["route_type"] is not None else None,
                         "stroke": stroke,
@@ -322,8 +390,8 @@ async def get_routes_tile(
                         "current_duration_seconds": r["current_duration_seconds"],
                         "static_duration_seconds": r["static_duration_seconds"],
                         "traffic_status": r["traffic_status"],
-                        "latest_data_update_time": r["latest_data_update_time"],
-                        "synced_at": r["synced_at"],
+                        "latest_data_update_time": _to_json_safe(r["latest_data_update_time"]),
+                        "synced_at": _to_json_safe(r["synced_at"]),
                         "origin": r["origin"],
                         "destination": r["destination"],
                         "waypoints": r["waypoints"],
@@ -331,20 +399,23 @@ async def get_routes_tile(
                 })
 
             except Exception as e:
+                skipped += 1
                 route_uuid = r["uuid"] if "uuid" in r.keys() else "Unknown"
-                logger.warning(f"Skipping invalid route UUID={route_uuid}: {e}")
+                logger.warning(
+                    "Skipping invalid route UUID=%s: %s",
+                    route_uuid,
+                    e,
+                )
 
         geojson = json.dumps({"type": "FeatureCollection", "features": features})
-
-        logger.info(f"[ROUTE TILE SUCCESS] Project {project_id} → {len(features)} features")
 
         return Response(
             content=geojson,
             media_type="application/json",
             headers={
                 "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*"
-            }
+                "Access-Control-Allow-Origin": "*",
+            },
         )
 
     except Exception as e:

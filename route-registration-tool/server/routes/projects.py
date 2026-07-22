@@ -17,13 +17,17 @@
 import logging
 import json
 import uuid
-from fastapi import APIRouter, HTTPException
+import re
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from server.db.database import query_db
+from server.db.common import query_db
 from server.utils.viewstate_calculator import calculate_viewstate
 from server.utils.feature_flags import ENABLE_MULTITENANT
+import server.db.common as projects_repo
+from server.db.common import ProjectRepoDomainError
 
 # Setup logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -37,6 +41,9 @@ router = APIRouter(prefix="/projects", tags=["Projects"])
 
 class ProjectCreate(BaseModel):
     """Model for creating a new project"""
+    session_id: Optional[str] = Field(
+        None, description="Owning session ID (UUID). If omitted, project is unscoped."
+    )
     project_name: str = Field(..., description="Name of the project")
     jurisdiction_boundary_geojson: str = Field(..., description="GeoJSON boundary as string")
     google_cloud_project_id: Optional[str] = Field(None, description="Google Cloud Project ID")
@@ -58,6 +65,7 @@ class ProjectOut(BaseModel):
     """Model for project responses"""
     id: int
     project_uuid: Optional[str] = None
+    session_id: Optional[str] = None
     project_name: str
     jurisdiction_boundary_geojson: str
     google_cloud_project_id: Optional[str] = None
@@ -95,6 +103,19 @@ class RoutesSummary(BaseModel):
     deleted: int = 0
     added: int = 0
 
+
+class ProjectsListPagination(BaseModel):
+    page: int
+    limit: int
+    total: int
+    has_more: bool
+
+
+class ProjectsListResponse(BaseModel):
+    projects: List[ProjectOut]
+    pagination: ProjectsListPagination
+    route_summaries: Dict[str, RoutesSummary]
+
 # --------------------------
 # Helper Functions
 # --------------------------
@@ -111,32 +132,106 @@ def validate_json_string(json_str: str, field_name: str) -> dict:
 
 def row_to_project_out(row) -> ProjectOut:
     """Convert database row to ProjectOut model"""
-    # sqlite3.Row objects use bracket notation, not .get()
-    # NULL values will be None in Python automatically
-    # Handle dataset_name which might not exist in older databases
+    # Handle both mapping-style and tuple-style rows.
+    def _get(key: str, idx: int):
+        try:
+            return row[key]
+        except Exception:
+            mapping = getattr(row, "_mapping", None)
+            if mapping is not None:
+                try:
+                    return mapping[key]
+                except Exception:
+                    pass
+            return row[idx]
+
+    def _to_optional_string(v: Any) -> str | None:
+        # DB drivers often return real datetime objects for DATETIME/TIMESTAMP columns.
+        # `ProjectOut` expects strings, so normalize here.
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return str(v)
+
     try:
-        dataset_name = row["dataset_name"]
+        dataset_name = _get("dataset_name", 7)
         # Use default if None or empty string
         if not dataset_name:
             dataset_name = "historical_roads_data"
     except (KeyError, IndexError):
         dataset_name = "historical_roads_data"
+
+    session_id_val: str | None
+    try:
+        session_id_val = _get("session_id", 13)
+        if session_id_val is not None:
+            session_id_val = str(session_id_val)
+    except Exception:
+        session_id_val = None
     
     return ProjectOut(
-        id=row["id"],
-        project_uuid=row["project_uuid"] if "project_uuid" in row.keys() else None,
-        project_name=row["project_name"],
-        jurisdiction_boundary_geojson=row["jurisdiction_boundary_geojson"],
-        google_cloud_project_id=row["google_cloud_project_id"],
-        google_cloud_project_number=row["google_cloud_project_number"],
-        subscription_id=row["subscription_id"],
+        id=_get("id", 0),
+        project_uuid=_get("project_uuid", 1),
+        session_id=session_id_val,
+        project_name=_get("project_name", 2),
+        jurisdiction_boundary_geojson=_get("jurisdiction_boundary_geojson", 3),
+        google_cloud_project_id=_get("google_cloud_project_id", 4),
+        google_cloud_project_number=_get("google_cloud_project_number", 5),
+        subscription_id=_get("subscription_id", 6),
         dataset_name=dataset_name,
-        viewstate=row["viewstate"],
-        map_snapshot=row["map_snapshot"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        deleted_at=row["deleted_at"]
+        viewstate=_get("viewstate", 8),
+        map_snapshot=_get("map_snapshot", 9),
+        created_at=_to_optional_string(_get("created_at", 10)),
+        updated_at=_to_optional_string(_get("updated_at", 11)),
+        deleted_at=_get("deleted_at", 12)
     )
+
+
+def _validate_session_id(session_id: str) -> str:
+    try:
+        import uuid as _uuid
+
+        return str(_uuid.UUID(str(session_id)))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid session_id (expected UUID).")
+
+
+async def _get_accessible_session_ids(session_id: str) -> list[str]:
+    """Return [session_id] + directly linked sessions (non-transitive)."""
+    sid = _validate_session_id(session_id)
+    rows = await query_db(
+        """
+        SELECT linked_session_id
+        FROM session_links
+        WHERE session_id = ?
+        """,
+        (sid,),
+    )
+    linked: list[str] = []
+    for r in rows:
+        try:
+            linked.append(r["linked_session_id"])
+        except Exception:
+            mapping = getattr(r, "_mapping", None)
+            if mapping is not None and "linked_session_id" in mapping:
+                linked.append(mapping["linked_session_id"])
+    out = [sid] + [s for s in linked if s]
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for s in out:
+        if s not in seen:
+            seen.add(s)
+            uniq.append(s)
+    return uniq
+
+def sanitize_error_for_5xx(e: Exception) -> str:
+    s = str(e)
+    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", s)
+    if len(s) > 400:
+        s = s[:397] + "..."
+    return s
 
 # --------------------------
 # API Endpoints
@@ -148,23 +243,48 @@ async def get_all_projects():
     try:
         logger.info("Fetching all projects")
         
-        projects_query = """
-        SELECT id, project_uuid, project_name, jurisdiction_boundary_geojson,
-               google_cloud_project_id, google_cloud_project_number, subscription_id,
-               dataset_name, viewstate, map_snapshot, created_at, updated_at, deleted_at
-        FROM projects 
-        WHERE deleted_at IS NULL
-        ORDER BY created_at DESC
-        """
-        
-        rows = await query_db(projects_query)
+        rows = await projects_repo.list_project_rows()
         
         projects = [row_to_project_out(row) for row in rows]
         logger.info(f"Found {len(projects)} projects")
         return projects
         
     except Exception as e:
+        print("errrrrr", e)
         logger.error(f"Error fetching projects: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch projects")
+
+
+@router.get("/list-paginated", response_model=ProjectsListResponse)
+async def get_projects_paginated(
+    page: int = Query(1, ge=1),
+    limit: int = Query(24, ge=1, le=100),
+    search: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None, description="Session ID (UUID) to scope projects."),
+):
+    """Get paginated non-deleted projects."""
+    try:
+        session_ids = None
+        if session_id:
+            session_ids = await _get_accessible_session_ids(session_id)
+        rows, total = await projects_repo.list_project_rows_paginated(
+            page=page, limit=limit, search=search, session_ids=session_ids
+        )
+        projects = [row_to_project_out(row) for row in rows]
+        project_ids = [p.id for p in projects]
+        summaries = await projects_repo.get_routes_summaries_by_project_ids(project_ids)
+        return ProjectsListResponse(
+            projects=projects,
+            pagination=ProjectsListPagination(
+                page=page,
+                limit=limit,
+                total=total,
+                has_more=(page * limit) < total,
+            ),
+            route_summaries={str(pid): RoutesSummary(**vals) for pid, vals in summaries.items()},
+        )
+    except Exception as e:
+        logger.exception("Error fetching paginated projects")
         raise HTTPException(status_code=500, detail="Failed to fetch projects")
 
 @router.get("/{project_id}/routes-summary", response_model=RoutesSummary)
@@ -179,13 +299,13 @@ async def get_project_routes_summary(project_id: int):
         FROM routes
         WHERE project_id = :project_id
         AND deleted_at IS NULL
-        AND has_children = 0
+        AND COALESCE(has_children, FALSE) = FALSE
         UNION ALL
         SELECT 'deleted' AS type, COUNT(*) AS count
         FROM routes
         WHERE project_id = :project_id
         AND deleted_at IS NOT NULL
-        AND is_segmented = 0
+        AND COALESCE(is_segmented, FALSE) = FALSE
         AND sync_status IN ('synced', 'validating', 'invalid')
         UNION ALL
         SELECT 'added' AS type, COUNT(*) AS count
@@ -193,8 +313,8 @@ async def get_project_routes_summary(project_id: int):
         WHERE project_id = :project_id
         AND deleted_at IS NULL
         AND sync_status = 'unsynced'
-        AND is_enabled = 1
-        AND has_children = 0;
+        AND COALESCE(is_enabled, FALSE) = TRUE
+        AND COALESCE(has_children, FALSE) = FALSE
         """
         rows = await query_db(query, params)
         
@@ -207,6 +327,7 @@ async def get_project_routes_summary(project_id: int):
         
         return RoutesSummary(**summary)
     except Exception as e:
+        logger.exception("Error fetching routes summary for project %s", project_id)
         logger.error(f"Error fetching routes summary for project {project_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch routes summary")
 
@@ -217,15 +338,7 @@ async def get_project_by_id(project_id: int):
     try:
         logger.info(f"Fetching project with ID: {project_id}")
         
-        query = """
-        SELECT id, project_uuid, project_name, jurisdiction_boundary_geojson,
-               google_cloud_project_id, google_cloud_project_number, subscription_id,
-               dataset_name, viewstate, map_snapshot, created_at, updated_at, deleted_at
-        FROM projects 
-        WHERE id = ? AND deleted_at IS NULL
-        """
-        
-        row = await query_db(query, (project_id,), one=True)
+        row = await projects_repo.get_project_row(project_id)
         
         if not row:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -250,37 +363,6 @@ async def create_project(project_data: ProjectCreate):
         # Validate JSON fields
         validate_json_string(project_data.jurisdiction_boundary_geojson, "jurisdiction_boundary_geojson")
         
-        # Check for duplicate project_name
-        existing_name_query = """
-        SELECT id FROM projects 
-        WHERE project_name = ? AND deleted_at IS NULL
-        """
-        existing_name = await query_db(existing_name_query, (project_data.project_name,), one=True)
-        if existing_name:
-            raise HTTPException(
-                status_code=400,
-                detail=f"A project with the name '{project_data.project_name}' already exists. Please choose a different name."
-            )
-        
-        # Prepare GCP/subscription/dataset fields for insert
-        google_cloud_project_id = project_data.google_cloud_project_id
-        google_cloud_project_number = project_data.google_cloud_project_number
-        subscription_id = project_data.subscription_id
-        dataset_name = project_data.dataset_name
-
-        # Single-tenant: one GCP project per app project
-        if not ENABLE_MULTITENANT and google_cloud_project_id:
-            existing_gcp_query = """
-            SELECT id, project_name FROM projects
-            WHERE google_cloud_project_id = ? AND deleted_at IS NULL
-            """
-            existing_gcp = await query_db(existing_gcp_query, (google_cloud_project_id,), one=True)
-            if existing_gcp:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"A project with Google Cloud Project ID '{google_cloud_project_id}' already exists (Project: '{existing_gcp['project_name']}'). Each GCP project can only be used once."
-                )
-        
         # Calculate viewstate from GeoJSON boundary
         try:
             viewstate = calculate_viewstate(project_data.jurisdiction_boundary_geojson)
@@ -288,39 +370,40 @@ async def create_project(project_data: ProjectCreate):
         except Exception as e:
             logger.warning(f"Failed to calculate viewstate: {str(e)}, continuing without viewstate")
             viewstate_json = None
-        
+
         project_uuid_val = str(uuid.uuid4())
-        query = """
-        INSERT INTO projects (project_uuid, project_name, jurisdiction_boundary_geojson, viewstate, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        
-        project_id = await query_db(
-            query,
-            (
-                project_uuid_val,
-                project_data.project_name,
-                project_data.jurisdiction_boundary_geojson,
-                viewstate_json,
-                google_cloud_project_id,
-                google_cloud_project_number,
-                subscription_id,
-                dataset_name
-            ),
-            commit=True
+        row = await projects_repo.create_project(
+            project_name=project_data.project_name,
+            jurisdiction_boundary_geojson=project_data.jurisdiction_boundary_geojson,
+            google_cloud_project_id=project_data.google_cloud_project_id,
+            google_cloud_project_number=project_data.google_cloud_project_number,
+            subscription_id=project_data.subscription_id,
+            dataset_name=project_data.dataset_name,
+            enable_multitenant=ENABLE_MULTITENANT,
+            project_uuid=project_uuid_val,
+            viewstate_json=viewstate_json,
+            session_id=_validate_session_id(project_data.session_id)
+            if project_data.session_id
+            else None,
         )
-        
-        # Fetch the created project
-        created_project = await get_project_by_id(project_id)
-        logger.info(f"Created project with ID: {project_id}")
-        
+
+        created_project = row_to_project_out(row)
+        logger.info(f"Created project with ID: {created_project.id}")
         return created_project
         
     except HTTPException:
         raise
+    except ProjectRepoDomainError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     except Exception as e:
-        logger.error(f"Error creating project: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to create project")
+        logger.exception("Error creating project")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Failed to create project",
+                "error": sanitize_error_for_5xx(e),
+            },
+        )
 
 @router.put("/{project_id}", response_model=ProjectOut)
 async def update_project(project_id: int, project_data: ProjectUpdate):
@@ -335,13 +418,30 @@ async def update_project(project_id: int, project_data: ProjectUpdate):
         if project_data.jurisdiction_boundary_geojson:
             validate_json_string(project_data.jurisdiction_boundary_geojson, "jurisdiction_boundary_geojson")
         
-        # Check for duplicate project_name (if being updated)
+        # Check for duplicate project_name within the same session scope (if being updated)
         if project_data.project_name is not None:
-            existing_name_query = """
-            SELECT id FROM projects 
-            WHERE project_name = ? AND id != ? AND deleted_at IS NULL
-            """
-            existing_name = await query_db(existing_name_query, (project_data.project_name, project_id), one=True)
+            if existing_project.session_id is not None:
+                existing_name_query = """
+                SELECT id FROM projects
+                WHERE project_name = ? AND id != ? AND deleted_at IS NULL
+                AND session_id = ?
+                """
+                existing_name = await query_db(
+                    existing_name_query,
+                    (project_data.project_name, project_id, existing_project.session_id),
+                    one=True,
+                )
+            else:
+                existing_name_query = """
+                SELECT id FROM projects
+                WHERE project_name = ? AND id != ? AND deleted_at IS NULL
+                AND session_id IS NULL
+                """
+                existing_name = await query_db(
+                    existing_name_query,
+                    (project_data.project_name, project_id),
+                    one=True,
+                )
             if existing_name:
                 raise HTTPException(
                     status_code=400,
@@ -484,7 +584,9 @@ async def format_and_create_projects(request: FormatAndCreateRequest):
                     detail="Either project_name or region_name must be provided"
                 )
             
-            geojson = project_data.geojson or project_data.jurisdiction_boundary_geojson
+            geojson = project_data.geojson or getattr(
+                project_data, "jurisdiction_boundary_geojson", None
+            )
             if not geojson:
                 raise HTTPException(
                     status_code=400,
@@ -502,44 +604,20 @@ async def format_and_create_projects(request: FormatAndCreateRequest):
                 logger.warning(f"Failed to calculate viewstate for project: {str(e)}, continuing without viewstate")
                 viewstate_json = None
 
-            # Single-tenant: one GCP project per app project
-            if not ENABLE_MULTITENANT and project_data.google_cloud_project_id:
-                existing_gcp_query = """
-                SELECT id, project_name FROM projects
-                WHERE google_cloud_project_id = ? AND deleted_at IS NULL
-                """
-                existing_gcp = await query_db(
-                    existing_gcp_query,
-                    (project_data.google_cloud_project_id,),
-                    one=True,
-                )
-                if existing_gcp:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"A project with Google Cloud Project ID '{project_data.google_cloud_project_id}' already exists (Project: '{existing_gcp['project_name']}'). Each GCP project can only be used once."
-                    )
-            
             project_uuid_val = str(uuid.uuid4())
-            query = """
-            INSERT INTO projects (project_uuid, project_name, jurisdiction_boundary_geojson, viewstate, google_cloud_project_id, google_cloud_project_number, subscription_id, dataset_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            
-            project_id = await query_db(
-                query,
-                (
-                    project_uuid_val,
-                    project_name,
-                    geojson,
-                    viewstate_json,
-                    project_data.google_cloud_project_id,
-                    project_data.google_cloud_project_number,
-                    project_data.subscription_id,
-                    project_data.dataset_name
-                ),
-                commit=True
+            row = await projects_repo.create_project(
+                project_name=project_name,
+                jurisdiction_boundary_geojson=geojson,
+                google_cloud_project_id=project_data.google_cloud_project_id,
+                google_cloud_project_number=project_data.google_cloud_project_number,
+                subscription_id=project_data.subscription_id,
+                dataset_name=project_data.dataset_name,
+                enable_multitenant=ENABLE_MULTITENANT,
+                project_uuid=project_uuid_val,
+                viewstate_json=viewstate_json,
             )
-            
+
+            project_id = row["id"] if isinstance(row, dict) else row[0]
             inserted_ids.append(project_id)
             logger.info(f"Created project with ID: {project_id}")
         
@@ -549,6 +627,14 @@ async def format_and_create_projects(request: FormatAndCreateRequest):
         
     except HTTPException:
         raise
+    except ProjectRepoDomainError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     except Exception as e:
-        logger.error(f"Error in format-and-create: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to create projects")
+        logger.exception("Error in format-and-create")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Failed to create projects",
+                "error": sanitize_error_for_5xx(e),
+            },
+        )

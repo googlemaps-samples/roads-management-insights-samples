@@ -24,7 +24,6 @@ from geopy.distance import distance
 from datetime import datetime
 import polyline
 from .firebase_logger import log_route_creation
-import threading
 
 
 logger = logging.getLogger(__name__)
@@ -277,10 +276,10 @@ def insert_stretch_into_db(stretch, project_id, tag, route_map, i):
         "distance": data["length"],
         "tag": f"{tag}-stretched",
     }
-    # Schedule logging in background thread (fire and forget)
-    def log_stretch():
+    try:
         log_route_creation(stretch_uuid, stretch_metadata, None, False)
-    threading.Thread(target=log_stretch, daemon=True).start()
+    except Exception:
+        logger.exception("Failed to log stretch route creation: %s", stretch_uuid)
 
 # ------------------------------------------------------------
 # MAIN

@@ -24,7 +24,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from server.db.database import query_db
+from server.db.common import query_db
 from server.utils.spatial_helpers import parse_polyline, get_endpoints, calculate_road_length
 from server.utils.sql_connectivity import (
     get_road_connections_sql,

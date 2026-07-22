@@ -2,21 +2,16 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
+"""Sync and async SQLAlchemy engines (shared async engine with ``server.db.common``)."""
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import create_async_engine
 
-from server.db.database import DB
+from server.db.common import get_database_urls
+import server.db.common as _db
 
-engine = create_engine(f"sqlite:///{DB}", pool_pre_ping=True)
-async_engine = create_async_engine(f"sqlite+aiosqlite:///{DB}", pool_pre_ping=True)
+_, sync_url = get_database_urls()
+engine = create_engine(sync_url, pool_pre_ping=True)
+
+# Single async engine for the app (see ``server.db.common``)
+async_engine = _db.async_engine

@@ -20,8 +20,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 from geographiclib.geodesic import Geodesic
-from server.db.database import query_db
-from server.utils.polygon_roads_api import fetch_roads_generator, create_roads_sqlite
+from server.db.common import query_db
+from server.utils.polygon_roads_api import create_roads_batch, fetch_roads_generator
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ def _process_polygon_create(project_id: int, geometry: Dict[str, Any], priority_
     try:
         for road_batch in fetch_roads_generator(geometry):
             total_roads_processed += len(road_batch)
-            batch_result = create_roads_sqlite(road_batch, project_id=project_id, priority_list=priority_list)
+            batch_result = create_roads_batch(road_batch, project_id=project_id, priority_list=priority_list)
             successfully_added: Dict[int, float] = batch_result["successfully_added"]
             endpoints_data: Dict[int, str] = batch_result["endpoints_data"]
             failed_to_add: List[int] = batch_result["failed_to_add"]
@@ -281,7 +281,11 @@ async def create_polygon(payload: PolygonCreateRequest):
 @router.delete("/delete/{project_id}")
 async def delete_roads(project_id: int):
     try:
-        await query_db("DELETE FROM roads WHERE project_id = ?", (project_id,), commit=True)
+        await query_db(
+            "DELETE FROM roads WHERE project_id = :project_id",
+            {"project_id": project_id},
+            commit=True,
+        )
         return {"message": "Roads deleted successfully"}
     except HTTPException as e:
         raise e

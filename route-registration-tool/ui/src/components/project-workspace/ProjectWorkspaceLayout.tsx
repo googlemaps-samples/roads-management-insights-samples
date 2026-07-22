@@ -101,10 +101,6 @@ const ProjectWorkspaceLayout: React.FC<ProjectWorkspaceLayoutProps> = ({
     error: projectError,
   } = useProject(projectId)
 
-  // PubSub listener mutations - DISABLED
-  // const startListener = useStartPubSubListener()
-  // const stopListener = useStopPubSubListener()
-
   // WebSocket connection for live route updates and route status updates
   const projectNumber = project?.bigQueryColumn?.googleCloudProjectNumber
     ? parseInt(project.bigQueryColumn.googleCloudProjectNumber, 10)
@@ -168,85 +164,6 @@ const ProjectWorkspaceLayout: React.FC<ProjectWorkspaceLayoutProps> = ({
   //   }
   // }, [wsConnectionState, wsError])
 
-  // Manage PubSub listener lifecycle - DISABLED
-  // useEffect(() => {
-  //   // Start listener when project is loaded
-  //   if (project && projectId) {
-  //     // Handle both new and legacy schema formats
-  //     const bigQueryColumn = project.bigQueryColumn
-  //     const googleBigQueryConfig = (project as any).googleBigQueryConfig
-
-  //     // Get GCP project ID from new schema or legacy schema
-  //     const gcpProjectId =
-  //       bigQueryColumn?.googleCloudProjectId ||
-  //       googleBigQueryConfig?.projectId ||
-  //       ""
-
-  //     // Get subscription ID from new schema or legacy schema (datasetId was used as subscription_id)
-  //     const subscriptionId =
-  //       bigQueryColumn?.subscriptionId || googleBigQueryConfig?.datasetId || ""
-
-  //     // Only start listener if we have a GCP project ID
-  //     // --- Debugging why subscription_id is empty ---
-  //     // Examine both new and legacy schemas for subscriptionId/datasetId
-  //     // Log to debug where subscriptionId may be missing
-  //     if (gcpProjectId) {
-  //       // Log all relevant possible keys for debugging
-  //       console.log("[PubSub Debug] bigQueryColumn:", bigQueryColumn)
-  //       console.log(
-  //         "[PubSub Debug] googleBigQueryConfig:",
-  //         googleBigQueryConfig,
-  //       )
-
-  //       // Show all possible relevant fields for diagnosis
-  //       console.log(
-  //         "[PubSub Debug] subscriptionId from bigQueryColumn:",
-  //         bigQueryColumn?.subscriptionId,
-  //       )
-  //       console.log(
-  //         "[PubSub Debug] datasetId from googleBigQueryConfig:",
-  //         googleBigQueryConfig?.datasetId,
-  //       )
-
-  //       // Warn if both are empty just before using them
-  //       if (!subscriptionId) {
-  //         console.warn(
-  //           "[PubSub Debug] subscriptionId is missing. projectId:",
-  //           projectId,
-  //           {
-  //             "bigQueryColumn.subscriptionId": bigQueryColumn?.subscriptionId,
-  //             "googleBigQueryConfig.datasetId": googleBigQueryConfig?.datasetId,
-  //           },
-  //         )
-  //       }
-
-  //       const config = {
-  //         gcp_project_id: gcpProjectId.toString(),
-  //         project_db_id: parseInt(projectId),
-  //         gcp_project_number: projectNumber.toString(),
-  //       }
-
-  //       console.log(
-  //         "🔌 Starting PubSub listener for project:",
-  //         projectId,
-  //         "with payload:",
-  //         config,
-  //       )
-  //       startListener.mutate(config)
-
-  //       // Cleanup: Stop listener when component unmounts or project changes
-  //       return () => {
-  //         console.log("🔌 Stopping PubSub listener for project:", projectId)
-  //         stopListener.mutate()
-  //       }
-  //     } else {
-  //       console.warn(
-  //         "⚠️ Cannot start PubSub listener: GCP project ID not found for project:",
-  //         projectId,
-  //       )
-  //     }
-  //   }
-  // }, [project, projectId])
 
   // Show loading state while data is being loaded
   if (isProjectLoading) {
