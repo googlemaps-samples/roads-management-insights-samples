@@ -15,6 +15,7 @@
 
 import json
 import io
+import re
 import zipfile
 import logging
 import uuid
@@ -88,6 +89,8 @@ async def import_project_from_zip(
     google_cloud_project_number = json_project.get("google_cloud_project_number")
     subscription_id = json_project.get("subscription_id")
     dataset_name = json_project.get("dataset_name") or "historical_roads_data"
+    if not re.match(r"^[a-zA-Z0-9_-]{1,1024}$", dataset_name):
+        raise ValueError("Invalid dataset_name in import file: contains invalid characters.")
     viewstate = json_project.get("viewstate")
     jurisdiction_boundary_geojson = json_project.get("jurisdiction_boundary_geojson")
     map_snapshot = json_project.get("map_snapshot")

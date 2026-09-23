@@ -17,7 +17,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from server.db.common import query_db
 from typing import Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, Any
 from server.utils.sync_routes import execute_sync
@@ -29,11 +29,14 @@ logger = logging.getLogger("sync_api")
 
 router = APIRouter()
 
+DATASET_NAME_REGEX = r"^[a-zA-Z0-9_-]{1,1024}$"
+GCP_PROJECT_ID_REGEX = r"^[a-zA-Z0-9_-]{1,1024}$"
+
 class SyncToBigQueryRequest(BaseModel):
     db_project_id: int
     project_number: str
-    gcp_project_id: str
-    dataset_name: str  # Required: BigQuery dataset name
+    gcp_project_id: str = Field(..., pattern=GCP_PROJECT_ID_REGEX, description="GCP project ID")
+    dataset_name: str = Field(..., pattern=DATASET_NAME_REGEX, description="BigQuery dataset name")
     tag: Optional[str] = None  # Optional: If provided, only syncs specific tag (no BQ/Fetch)
     uuid: Optional[str] = None  # Optional: If provided, only syncs a single route
 
@@ -115,5 +118,5 @@ async def sync_to_bigquery(config: SyncToBigQueryRequest):
         raise he
     except Exception as e:
         # Catch unexpected generic errors
-        logger.exception("Critical unexpected error in unified sync endpoint")
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+        logger.exception(f"Critical unexpected error in unified sync endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error during sync. Check server logs for details.")

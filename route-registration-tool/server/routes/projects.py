@@ -46,19 +46,19 @@ class ProjectCreate(BaseModel):
     )
     project_name: str = Field(..., description="Name of the project")
     jurisdiction_boundary_geojson: str = Field(..., description="GeoJSON boundary as string")
-    google_cloud_project_id: Optional[str] = Field(None, description="Google Cloud Project ID")
+    google_cloud_project_id: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="Google Cloud Project ID")
     google_cloud_project_number: Optional[str] = Field(None, description="Google Cloud Project Number")
     subscription_id: Optional[str] = Field(None, description="Subscription ID")
-    dataset_name: Optional[str] = Field(None, description="BigQuery dataset name")
+    dataset_name: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="BigQuery dataset name")
 
 class ProjectUpdate(BaseModel):
     """Model for updating a project"""
     project_name: Optional[str] = Field(None, description="Name of the project")
     jurisdiction_boundary_geojson: Optional[str] = Field(None, description="GeoJSON boundary as string")
-    google_cloud_project_id: Optional[str] = Field(None, description="Google Cloud Project ID")
+    google_cloud_project_id: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="Google Cloud Project ID")
     google_cloud_project_number: Optional[str] = Field(None, description="Google Cloud Project Number")
     subscription_id: Optional[str] = Field(None, description="Subscription ID")
-    dataset_name: Optional[str] = Field(None, description="BigQuery dataset name")
+    dataset_name: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="BigQuery dataset name")
     map_snapshot: Optional[str] = Field(None, description="Base64-encoded map snapshot image")
 
 class ProjectOut(BaseModel):
@@ -84,10 +84,10 @@ class ProjectFormatAndCreate(BaseModel):
     region_name: Optional[str] = Field(None, description="Region name (maps to project_name)")
     project_name: Optional[str] = Field(None, description="Project name")
     geojson: Optional[str] = Field(None, description="GeoJSON (maps to jurisdiction_boundary_geojson)")
-    google_cloud_project_id: Optional[str] = Field(None, description="Google Cloud Project ID")
+    google_cloud_project_id: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="Google Cloud Project ID")
     google_cloud_project_number: Optional[str] = Field(None, description="Google Cloud Project Number")
     subscription_id: Optional[str] = Field(None, description="Subscription ID")
-    dataset_name: Optional[str] = Field(None, description="BigQuery dataset name")
+    dataset_name: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="BigQuery dataset name")
 
 class FormatAndCreateRequest(BaseModel):
     """Request body for format-and-create endpoint"""

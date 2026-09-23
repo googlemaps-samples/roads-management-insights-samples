@@ -15,6 +15,7 @@
 
 import logging
 import json
+import re
 import polyline
 from typing import Optional
 from datetime import datetime, timezone
@@ -101,6 +102,28 @@ load_dotenv(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 )
 VIEW_MODE = os.getenv("VIEW_MODE") or "false"
+
+_BIGQUERY_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,1024}$")
+
+
+def validate_bigquery_identifier(value: str, field_name: str = "identifier") -> str:
+    """
+    Validates that a BigQuery identifier (dataset name or project ID) contains
+    only safe alphanumeric characters, underscores, and hyphens, preventing
+    SQL injection breakout via backticks, whitespace, quotes, or comments.
+    """
+    if not value or not isinstance(value, str):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name}: must be a non-empty string."
+        )
+    if not _BIGQUERY_IDENTIFIER_PATTERN.match(value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name}: contains invalid characters. Only alphanumeric characters, underscores, and hyphens are allowed."
+        )
+    return value
+
 
 async def run_bq_query(client, sql):
     loop = asyncio.get_event_loop()
@@ -1326,6 +1349,9 @@ async def perform_bq_sync(gcp_project_id, db_project_id, dataset_name: str):
     Raises:
         HTTPException: If BigQuery query fails (fail-fast behavior)
     """
+    validate_bigquery_identifier(gcp_project_id, "gcp_project_id")
+    validate_bigquery_identifier(dataset_name, "dataset_name")
+
     logger.info(
         f"Performing BQ sync for project {db_project_id} with dataset: {dataset_name}."
     )
@@ -1374,11 +1400,13 @@ async def perform_bq_sync(gcp_project_id, db_project_id, dataset_name: str):
         rows = await run_bq_query(client, query)
         rows = [dict(row) for row in rows]
         logger.info(f"Fetched {len(rows)} rows from BigQuery.")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"BigQuery execution failed: {e}")
         raise HTTPException(
             status_code=502,
-            detail=f"BigQuery sync failed: {str(e)}"
+            detail="BigQuery sync failed. Check server logs for details."
         )
 
     if not rows:
@@ -1488,6 +1516,9 @@ async def execute_sync(
     if VIEW_MODE == "TRUE":
         logger.info("Running in view mode.")
         return {"status": "success", "message": "Running in view mode."}
+
+    validate_bigquery_identifier(gcp_project_id, "gcp_project_id")
+    validate_bigquery_identifier(dataset_name, "dataset_name")
 
     project_uuid = await get_project_uuid(db_project_id)
     if not project_uuid:
