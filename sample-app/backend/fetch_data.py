@@ -16,6 +16,8 @@
 import os
 import json
 import time
+import re
+import logging
 from google.cloud import bigquery
 import pytz
 from datetime import datetime, timedelta
@@ -28,6 +30,8 @@ from zoneinfo import ZoneInfo
 from functools import wraps
 from cachetools import TTLCache
 import hashlib
+
+logger = logging.getLogger(__name__)
 
 load_dotenv("../.env")
 
@@ -43,6 +47,43 @@ avg_travel_time_cache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL)
 hourly_data_cache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL)
 latest_data_cache = TTLCache(maxsize=100, ttl=300)  # 5 minutes for latest data
 city_details_cache = TTLCache(maxsize=50, ttl=3600)  # 1 hour for city details
+
+
+def validate_date_string(date_str: str) -> str:
+    """
+    Validates that date_str is a valid date string in YYYY-MM-DD format.
+    Raises ValueError if invalid.
+    """
+    if not isinstance(date_str, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+        raise ValueError(f"Invalid date format: '{date_str}'. Expected YYYY-MM-DD.")
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError as e:
+        raise ValueError(f"Invalid calendar date: '{date_str}'. Error: {e}")
+    return date_str
+
+
+def validate_weekdays(weekdays: List[int]) -> List[int]:
+    """
+    Validates that weekdays is a non-empty list of integers between 1 and 7.
+    Raises ValueError if invalid.
+    """
+    if not isinstance(weekdays, list) or not weekdays:
+        raise ValueError("Weekdays must be a non-empty list of integers.")
+    for d in weekdays:
+        if not isinstance(d, int) or d < 1 or d > 7:
+            raise ValueError(f"Invalid weekday: {d}. Expected integer between 1 (Sunday) and 7 (Saturday).")
+    return weekdays
+
+
+def validate_bigquery_identifier(identifier: str, name: str = "identifier") -> str:
+    """
+    Validates that a BigQuery project, dataset, or table identifier contains only allowed characters.
+    """
+    if not identifier or not re.match(r"^[a-zA-Z0-9_-]{1,1024}$", identifier):
+        raise ValueError(f"Invalid BigQuery {name}: '{identifier}'")
+    return identifier
+
 
 def get_city_config(city_name: str) -> Dict[str, str]:
     """
@@ -65,14 +106,24 @@ def get_city_config(city_name: str) -> Dict[str, str]:
         ValueError: If required environment variables are missing or invalid
     """
     try:
-        bq_project = os.getenv(f"{city_name}_BIGQUERY_PROJECT")
-        bq_historical_dataset = os.getenv(f"{city_name}_BIGQUERY_HISTORICAL_DATASET")
-        bq_historical_table = os.getenv(f"{city_name}_BIGQUERY_HISTORICAL_TABLE")
-        bq_routes_table = os.getenv(f"{city_name}_BIGQUERY_ROUTES_TABLE")
-        timezone_name = os.getenv(f"{city_name}_TIMEZONE")
+        city_name_upper = city_name.upper()
+        if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", city_name_upper):
+            raise ValueError(f"Invalid city name: '{city_name}'")
+
+        bq_project = os.getenv(f"{city_name_upper}_BIGQUERY_PROJECT")
+        bq_historical_dataset = os.getenv(f"{city_name_upper}_BIGQUERY_HISTORICAL_DATASET")
+        bq_historical_table = os.getenv(f"{city_name_upper}_BIGQUERY_HISTORICAL_TABLE")
+        bq_routes_table = os.getenv(f"{city_name_upper}_BIGQUERY_ROUTES_TABLE")
+        timezone_name = os.getenv(f"{city_name_upper}_TIMEZONE")
 
         if not all([bq_project, bq_historical_dataset, bq_historical_table, bq_routes_table, timezone_name]):
             raise ValueError("Required environment variables are not set.")
+
+        validate_bigquery_identifier(bq_project, "project")
+        validate_bigquery_identifier(bq_historical_dataset, "dataset")
+        validate_bigquery_identifier(bq_historical_table, "historical table")
+        validate_bigquery_identifier(bq_routes_table, "routes table")
+        ZoneInfo(timezone_name)
 
         return {
             "bq_project": bq_project,
@@ -83,7 +134,7 @@ def get_city_config(city_name: str) -> Dict[str, str]:
         }
 
     except (TypeError, ValueError) as e:
-        print(f"Error: Missing or invalid environment variables for '{city_name}'. Please check your .env file. Error: {e}")
+        logger.error(f"Error: Missing or invalid environment variables for '{city_name}'. Error: {e}")
         raise
 
 def create_cache_key(*args, **kwargs) -> str:
@@ -137,7 +188,7 @@ def clear_all_caches():
 
 # Function to fetch hourly aggregated data from BigQuery
 @cache_query(hourly_data_cache)
-def fetch_hourly_aggregated_data(city_name: str, display_names: List[str], from_date: str, to_date: str, weekdays: List[int]) -> Tuple[List[Dict[str, Any]], str]:
+def fetch_hourly_aggregated_data(city_name: str, display_names: List[str], from_date: str, to_date: str, weekdays: List[int]) -> List[Dict[str, Any]]:
     """
     Fetches hourly aggregated historical traffic data from BigQuery for specified routes,
     a given date range, and a list of specific weekdays (1=Sunday, 7=Saturday).
@@ -154,29 +205,43 @@ def fetch_hourly_aggregated_data(city_name: str, display_names: List[str], from_
     except ValueError:
         return []
 
-    single_day = (from_date == to_date)
+    try:
+        from_date = validate_date_string(from_date)
+        to_date = validate_date_string(to_date)
+        single_day = (from_date == to_date)
+        if not single_day:
+            weekdays = validate_weekdays(weekdays)
+        if display_names:
+            if not isinstance(display_names, list) or not all(isinstance(n, str) for n in display_names):
+                logger.warning("Invalid display_names provided. Returning empty data.")
+                return []
+    except ValueError as e:
+        logger.warning(f"Validation error in fetch_hourly_aggregated_data: {e}")
+        return []
 
-    # build weekday filter only if multi-day
+    query_params = [
+        bigquery.ScalarQueryParameter("from_date", "STRING", from_date),
+        bigquery.ScalarQueryParameter("to_date", "STRING", to_date),
+    ]
+
     weekday_filter = ""
     if not single_day:
-        if not weekdays or not all(1 <= d <= 7 for d in weekdays):
-            print("Warning: No valid weekdays (1=Sun to 7=Sat) provided. Returning empty data.")
-            return []
-        weekdays_str = json.dumps(weekdays)
+        query_params.append(bigquery.ArrayQueryParameter("weekdays", "INT64", weekdays))
         weekday_filter = f"""
             AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') 
-                IN (SELECT CAST(w AS INT64) FROM UNNEST(JSON_QUERY_ARRAY('{weekdays_str}', '$')) AS w)
+                IN UNNEST(@weekdays)
         """
 
-    print(f"Fetching data for city: {city_name}, from: {from_date}, to: {to_date}, weekdays: {weekdays if not single_day else 'IGNORED'}, display_names: {display_names if display_names else 'ALL'}")
+    logger.info(f"Fetching data for city: {city_name}, from: {from_date}, to: {to_date}, weekdays: {weekdays if not single_day else 'IGNORED'}, display_names: {display_names if display_names else 'ALL'}")
 
     try:
         client = bigquery.Client(project=bq_project)
     except Exception as e:
-        print(f"Error setting up BigQuery client: {e}")
+        logger.error(f"Error setting up BigQuery client: {e}")
         return []
 
     if isinstance(display_names, list) and display_names:
+        query_params.append(bigquery.ArrayQueryParameter("display_names", "STRING", display_names))
         query = f"""
         WITH route_ids_for_display_names AS (
             SELECT
@@ -184,7 +249,7 @@ def fetch_hourly_aggregated_data(city_name: str, display_names: List[str], from_
             FROM
                 `{bq_project}.{bq_historical_dataset}.{bq_routes_table}`
             WHERE
-                display_name IN UNNEST({json.dumps(display_names)})
+                display_name IN UNNEST(@display_names)
         )
         SELECT
             selected_route_id,
@@ -194,8 +259,8 @@ def fetch_hourly_aggregated_data(city_name: str, display_names: List[str], from_
         FROM
             `{bq_project}.{bq_historical_dataset}.{bq_historical_table}`
         WHERE
-            record_time >= TIMESTAMP(DATETIME '{from_date} 00:00:00', '{timezone_name}')
-            AND record_time <= TIMESTAMP(DATETIME '{to_date} 23:59:59', '{timezone_name}')
+            record_time >= PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', CONCAT(@from_date, ' 00:00:00'), '{timezone_name}')
+            AND record_time <= PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', CONCAT(@to_date, ' 23:59:59'), '{timezone_name}')
             {weekday_filter}
             AND selected_route_id IN (SELECT selected_route_id FROM route_ids_for_display_names)
         GROUP BY
@@ -220,8 +285,8 @@ def fetch_hourly_aggregated_data(city_name: str, display_names: List[str], from_
         FROM
             `{bq_project}.{bq_historical_dataset}.{bq_historical_table}`
         WHERE
-            record_time >= TIMESTAMP(DATETIME '{from_date} 00:00:00', '{timezone_name}')
-            AND record_time <= TIMESTAMP(DATETIME '{to_date} 23:59:59', '{timezone_name}')
+            record_time >= PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', CONCAT(@from_date, ' 00:00:00'), '{timezone_name}')
+            AND record_time <= PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S', CONCAT(@to_date, ' 23:59:59'), '{timezone_name}')
             {weekday_filter}
             AND selected_route_id IN (SELECT selected_route_id FROM route_ids_to_process)
         GROUP BY
@@ -232,16 +297,15 @@ def fetch_hourly_aggregated_data(city_name: str, display_names: List[str], from_
             record_time;
         """
 
-    # print("Executing query...", query)
-
     try:
-        query_job = client.query(query)
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+        query_job = client.query(query, job_config=job_config)
         results = query_job.result()
     except Exception as e:
-        print(f"An error occurred during query execution: {e}")
+        logger.error(f"An error occurred during query execution: {e}")
         return []
 
-    print("Query executed successfully. Processing results...")
+    logger.info("Query executed successfully. Processing results...")
 
     def get_dynamic_hour_shift(timezone_name):
         tz = pytz.timezone(timezone_name)
@@ -332,23 +396,36 @@ def fetch_route_metrics(city_name: str, display_names: List[str], from_date: str
     except ValueError:
         return _empty_metrics()
 
-    if not weekdays or not all(1 <= d <= 7 for d in weekdays):
-        print("Warning: No valid weekdays (1=Sun to 7=Sat) provided. Returning empty data.")
+    try:
+        from_date = validate_date_string(from_date)
+        to_date = validate_date_string(to_date)
+        weekdays = validate_weekdays(weekdays)
+        if display_names:
+            if not isinstance(display_names, list) or not all(isinstance(n, str) for n in display_names):
+                logger.warning("Invalid display_names provided. Returning empty data.")
+                return _empty_metrics()
+    except ValueError as e:
+        logger.warning(f"Validation error in fetch_route_metrics: {e}")
         return _empty_metrics()
-
-    weekdays_str = json.dumps(weekdays)
 
     try:
         client = bigquery.Client(project=bq_project)
     except Exception as e:
-        print(f"Error setting up BigQuery client: {e}")
+        logger.error(f"Error setting up BigQuery client: {e}")
         return _empty_metrics()
     
+    query_params = [
+        bigquery.ScalarQueryParameter("from_date", "STRING", from_date),
+        bigquery.ScalarQueryParameter("to_date", "STRING", to_date),
+        bigquery.ArrayQueryParameter("weekdays", "INT64", weekdays),
+    ]
+
     # Build query with two-step aggregation to match TypeScript logic:
     # Step 1 (inner): Average each route per hour per date (handles multiple measurements within hour)
     # Step 2 (outer): Sum all routes together per hour per date (total network traversal time)
     # Also return per-route data for individual route analysis
     if display_names:
+        query_params.append(bigquery.ArrayQueryParameter("display_names", "STRING", display_names))
         query = f"""
         WITH route_ids_for_display_names AS (
             SELECT
@@ -356,7 +433,7 @@ def fetch_route_metrics(city_name: str, display_names: List[str], from_date: str
             FROM
                 `{bq_project}.{bq_historical_dataset}.{bq_routes_table}`
             WHERE
-                display_name IN UNNEST({json.dumps(display_names)})
+                display_name IN UNNEST(@display_names)
         ),
         route_hourly_avg AS (
             -- Step 1: Average each route per hour per date
@@ -375,8 +452,8 @@ def fetch_route_metrics(city_name: str, display_names: List[str], from_date: str
             FROM
                 `{bq_project}.{bq_historical_dataset}.{bq_historical_table}`
             WHERE
-                DATE(record_time, '{timezone_name}') BETWEEN '{from_date}' AND '{to_date}'
-                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN (SELECT CAST(w AS INT64) FROM UNNEST(JSON_QUERY_ARRAY('{weekdays_str}', '$')) AS w)
+                DATE(record_time, '{timezone_name}') BETWEEN PARSE_DATE('%Y-%m-%d', @from_date) AND PARSE_DATE('%Y-%m-%d', @to_date)
+                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN UNNEST(@weekdays)
                 AND selected_route_id IN (SELECT selected_route_id FROM route_ids_for_display_names)
                 AND duration_in_seconds IS NOT NULL
                 AND duration_in_seconds > 0
@@ -434,8 +511,8 @@ def fetch_route_metrics(city_name: str, display_names: List[str], from_date: str
             FROM
                 `{bq_project}.{bq_historical_dataset}.{bq_historical_table}`
             WHERE
-                DATE(record_time, '{timezone_name}') BETWEEN '{from_date}' AND '{to_date}'
-                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN (SELECT CAST(w AS INT64) FROM UNNEST(JSON_QUERY_ARRAY('{weekdays_str}', '$')) AS w)
+                DATE(record_time, '{timezone_name}') BETWEEN PARSE_DATE('%Y-%m-%d', @from_date) AND PARSE_DATE('%Y-%m-%d', @to_date)
+                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN UNNEST(@weekdays)
                 AND duration_in_seconds IS NOT NULL
                 AND duration_in_seconds > 0
             GROUP BY
@@ -474,10 +551,11 @@ def fetch_route_metrics(city_name: str, display_names: List[str], from_date: str
         """
     
     try:
-        query_job = client.query(query)
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+        query_job = client.query(query, job_config=job_config)
         results = query_job.result()
     except Exception as e:
-        print(f"An error occurred during query execution: {e}")
+        logger.error(f"An error occurred during query execution: {e}")
         return _empty_metrics()
 
     # Note: BigQuery already returns hours in the local timezone via:
@@ -671,20 +749,33 @@ def fetch_average_travel_time_by_hour(city_name: str, display_names: List[str], 
     except ValueError:
         return _empty_average_travel_time_data()
 
-    if not weekdays or not all(1 <= d <= 7 for d in weekdays):
-        print("Warning: No valid weekdays (1=Sun to 7=Sat) provided. Returning empty data.")
+    try:
+        from_date = validate_date_string(from_date)
+        to_date = validate_date_string(to_date)
+        weekdays = validate_weekdays(weekdays)
+        if display_names:
+            if not isinstance(display_names, list) or not all(isinstance(n, str) for n in display_names):
+                logger.warning("Invalid display_names provided. Returning empty data.")
+                return _empty_average_travel_time_data()
+    except ValueError as e:
+        logger.warning(f"Validation error in fetch_average_travel_time_by_hour: {e}")
         return _empty_average_travel_time_data()
-
-    weekdays_str = json.dumps(weekdays)
 
     try:
         client = bigquery.Client(project=bq_project)
     except Exception as e:
-        print(f"Error setting up BigQuery client: {e}")
+        logger.error(f"Error setting up BigQuery client: {e}")
         return _empty_average_travel_time_data()
     
+    query_params = [
+        bigquery.ScalarQueryParameter("from_date", "STRING", from_date),
+        bigquery.ScalarQueryParameter("to_date", "STRING", to_date),
+        bigquery.ArrayQueryParameter("weekdays", "INT64", weekdays),
+    ]
+
     # Build query with aggregation in BigQuery (much faster than processing raw rows in Python)
     if display_names:
+        query_params.append(bigquery.ArrayQueryParameter("display_names", "STRING", display_names))
         query = f"""
         WITH route_ids_for_display_names AS (
             SELECT
@@ -692,7 +783,7 @@ def fetch_average_travel_time_by_hour(city_name: str, display_names: List[str], 
             FROM
                 `{bq_project}.{bq_historical_dataset}.{bq_routes_table}`
             WHERE
-                display_name IN UNNEST({json.dumps(display_names)})
+                display_name IN UNNEST(@display_names)
         ),
         route_hourly_avg AS (
             -- Aggregate: Average each route per hour per date
@@ -706,8 +797,8 @@ def fetch_average_travel_time_by_hour(city_name: str, display_names: List[str], 
             FROM
                 `{bq_project}.{bq_historical_dataset}.{bq_historical_table}`
             WHERE
-                DATE(record_time, '{timezone_name}') BETWEEN '{from_date}' AND '{to_date}'
-                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN (SELECT CAST(w AS INT64) FROM UNNEST(JSON_QUERY_ARRAY('{weekdays_str}', '$')) AS w)
+                DATE(record_time, '{timezone_name}') BETWEEN PARSE_DATE('%Y-%m-%d', @from_date) AND PARSE_DATE('%Y-%m-%d', @to_date)
+                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN UNNEST(@weekdays)
                 AND selected_route_id IN (SELECT selected_route_id FROM route_ids_for_display_names)
                 AND duration_in_seconds IS NOT NULL
                 AND duration_in_seconds > 0
@@ -748,8 +839,8 @@ def fetch_average_travel_time_by_hour(city_name: str, display_names: List[str], 
             FROM
                 `{bq_project}.{bq_historical_dataset}.{bq_historical_table}`
             WHERE
-                DATE(record_time, '{timezone_name}') BETWEEN '{from_date}' AND '{to_date}'
-                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN (SELECT CAST(w AS INT64) FROM UNNEST(JSON_QUERY_ARRAY('{weekdays_str}', '$')) AS w)
+                DATE(record_time, '{timezone_name}') BETWEEN PARSE_DATE('%Y-%m-%d', @from_date) AND PARSE_DATE('%Y-%m-%d', @to_date)
+                AND EXTRACT(DAYOFWEEK FROM record_time AT TIME ZONE '{timezone_name}') IN UNNEST(@weekdays)
                 AND selected_route_id IN (SELECT selected_route_id FROM route_ids_to_process)
                 AND duration_in_seconds IS NOT NULL
                 AND duration_in_seconds > 0
@@ -772,10 +863,11 @@ def fetch_average_travel_time_by_hour(city_name: str, display_names: List[str], 
         """
     
     try:
-        query_job = client.query(query)
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+        query_job = client.query(query, job_config=job_config)
         results = query_job.result()
     except Exception as e:
-        print(f"An error occurred during query execution: {e}")
+        logger.error(f"An error occurred during query execution: {e}")
         return _empty_average_travel_time_data()
 
     # Note: BigQuery already returns hours in the local timezone via:

@@ -19,11 +19,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import List, Optional
+from datetime import datetime
 import os
 import gzip
 import re
+import logging
 from pathlib import Path
 from brotli_asgi import BrotliMiddleware
+
+logger = logging.getLogger(__name__)
 
 from backend.fetch_data import (
     fetch_latest_historical_data,
@@ -59,11 +65,62 @@ app.add_middleware(
 
 app.add_middleware(BrotliMiddleware, quality=5, minimum_size=1000)
 
-app.mount("/assets", StaticFiles(directory="ui/dist/assets"), name="assets")
+if Path("ui/dist/assets").exists():
+    app.mount("/assets", StaticFiles(directory="ui/dist/assets"), name="assets")
+
+
+CITY_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def validate_city_name(city_name: str) -> str:
+    if not city_name or not CITY_NAME_PATTERN.match(city_name):
+        raise HTTPException(status_code=400, detail="Invalid city_name format")
+    return city_name.upper()
+
+
+class RouteDataRequest(BaseModel):
+    display_names: List[str] = Field(default_factory=list)
+    from_date: str = Field(..., description="Start date in YYYY-MM-DD format", pattern=r"^\d{4}-\d{2}-\d{2}$")
+    to_date: str = Field(..., description="End date in YYYY-MM-DD format", pattern=r"^\d{4}-\d{2}-\d{2}$")
+    weekdays: List[int] = Field(..., description="List of weekdays (1=Sunday, 7=Saturday)", min_length=1)
+
+    @field_validator("from_date", "to_date")
+    @classmethod
+    def validate_date(cls, v: str) -> str:
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Date must be a valid calendar date in YYYY-MM-DD format")
+        return v
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, v: List[int]) -> List[int]:
+        if not v:
+            raise ValueError("weekdays list cannot be empty")
+        for day in v:
+            if not isinstance(day, int) or day < 1 or day > 7:
+                raise ValueError("Each weekday must be an integer between 1 (Sunday) and 7 (Saturday)")
+        return v
+
+    @field_validator("display_names")
+    @classmethod
+    def validate_display_names(cls, v: List[str]) -> List[str]:
+        for name in v:
+            if not isinstance(name, str) or len(name) > 256:
+                raise ValueError("Each display name must be a string with maximum length of 256 characters")
+        return v
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "RouteDataRequest":
+        if self.from_date > self.to_date:
+            raise ValueError("from_date cannot be after to_date")
+        return self
+
 
 @app.get("/api/latest/{city_name}")
 async def get_latest_historical_data(city_name: str):
-    city_name = city_name.upper()
+    city_name = validate_city_name(city_name)
     geojson_data = fetch_latest_historical_data(city_name)
 
     if not geojson_data:
@@ -73,35 +130,26 @@ async def get_latest_historical_data(city_name: str):
 
 
 @app.post("/api/historical/{city_name}")
-async def get_hourly_aggregated_data(city_name: str, request: Request):
+async def get_hourly_aggregated_data(city_name: str, body: RouteDataRequest):
+    city_name = validate_city_name(city_name)
     try:
-        body = await request.json()  # get JSON as dict
-
-        display_names = body.get("display_names", [])
-        from_date = body.get("from_date")
-        to_date = body.get("to_date")
-        weekdays = body.get("weekdays", [])
-
-        city_name = city_name.upper()
-
         aggregated_data = fetch_hourly_aggregated_data(
-            city_name, display_names, from_date, to_date, weekdays
+            city_name, body.display_names, body.from_date, body.to_date, body.weekdays
         )
 
         if not aggregated_data:
             raise HTTPException(status_code=500, detail="Error fetching data")
 
         return aggregated_data
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"DEBUGGING ERROR: {e}")
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal Debugging Error: {e}")
+        logger.error(f"Error fetching historical data for {city_name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error fetching data")
 
 
 @app.post("/api/route-metrics/{city_name}")
-async def get_route_metrics(city_name: str, request: Request):
+async def get_route_metrics(city_name: str, body: RouteDataRequest):
     """
     API endpoint to calculate route metrics including:
     - Planning Time Index (PTI)
@@ -118,27 +166,10 @@ async def get_route_metrics(city_name: str, request: Request):
         "weekdays": [1, 2, 3, 4, 5]  // 1=Sunday, 7=Saturday
     }
     """
+    city_name = validate_city_name(city_name)
     try:
-        body = await request.json()
-
-        display_names = body.get("display_names", [])
-        from_date = body.get("from_date")
-        to_date = body.get("to_date")
-        weekdays = body.get("weekdays", [])
-
-        # Validate required parameters
-        if not from_date or not to_date:
-            raise HTTPException(
-                status_code=400, detail="from_date and to_date are required"
-            )
-
-        if not weekdays:
-            raise HTTPException(status_code=400, detail="weekdays list is required")
-
-        city_name = city_name.upper()
-
         route_metrics = fetch_route_metrics(
-            city_name, display_names, from_date, to_date, weekdays
+            city_name, body.display_names, body.from_date, body.to_date, body.weekdays
         )
 
         if route_metrics is None:
@@ -150,14 +181,12 @@ async def get_route_metrics(city_name: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"DEBUGGING ERROR: {e}")
-        import traceback
+        logger.error(f"Error calculating route metrics for {city_name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error calculating route metrics")
 
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal Debugging Error: {e}")
 
 @app.post("/api/average-travel-time-by-hour/{city_name}")
-async def get_average_travel_time_by_hour(city_name: str, request: Request):
+async def get_average_travel_time_by_hour(city_name: str, body: RouteDataRequest):
     """
     API endpoint to calculate average travel time by hour for all routes or specific routes.
     Similar to calculateAverageTravelTimeByHour in TypeScript.
@@ -183,27 +212,10 @@ async def get_average_travel_time_by_hour(city_name: str, request: Request):
         }
     }
     """
+    city_name = validate_city_name(city_name)
     try:
-        body = await request.json()
-
-        display_names = body.get("display_names", [])
-        from_date = body.get("from_date")
-        to_date = body.get("to_date")
-        weekdays = body.get("weekdays", [])
-
-        # Validate required parameters
-        if not from_date or not to_date:
-            raise HTTPException(
-                status_code=400, detail="from_date and to_date are required"
-            )
-
-        if not weekdays:
-            raise HTTPException(status_code=400, detail="weekdays list is required")
-
-        city_name = city_name.upper()
-
         average_travel_time_data = fetch_average_travel_time_by_hour(
-            city_name, display_names, from_date, to_date, weekdays
+            city_name, body.display_names, body.from_date, body.to_date, body.weekdays
         )
 
         if average_travel_time_data is None:
@@ -215,11 +227,8 @@ async def get_average_travel_time_by_hour(city_name: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"DEBUGGING ERROR: {e}")
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal Debugging Error: {e}")
+        logger.error(f"Error calculating average travel time by hour for {city_name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error calculating average travel time by hour")
 
 
 @app.get("/api/data/{file_path:path}")
@@ -262,7 +271,8 @@ async def get_data_file(file_path: str):
                 }
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error decompressing file: {str(e)}")
+            logger.error(f"Error decompressing file {file_path}: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Error decompressing file")
     
     # Fall back to uncompressed file if it exists
     elif file_full_path.exists() and file_full_path.is_file():
