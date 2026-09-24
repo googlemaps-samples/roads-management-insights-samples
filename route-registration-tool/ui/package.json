@@ -78,5 +78,10 @@
     "typescript": "latest",
     "typescript-eslint": "^8.56.0",
     "vite": "^7"
+  },
+  "overrides": {
+    "@luma.gl/gltf": "9.2.6",
+    "fflate": "^0.8.3",
+    "image-size": "^2.0.4"
   }
 }
