@@ -46,6 +46,7 @@ Road Selection Tool is a tool that allows you to select roads from a map and sav
     # Clone this repository.
     git clone https://github.com/googlemaps-samples/roads-management-insights-samples.git
     # Get inside directory.
+    cd roads-management-insights-samples
     cd route-registration-tool
     ```
 
