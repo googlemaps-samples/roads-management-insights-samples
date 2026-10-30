@@ -89,8 +89,17 @@ async def import_project_from_zip(
     google_cloud_project_number = json_project.get("google_cloud_project_number")
     subscription_id = json_project.get("subscription_id")
     dataset_name = json_project.get("dataset_name") or "historical_roads_data"
-    if not re.match(r"^[a-zA-Z0-9_-]{1,1024}$", dataset_name):
+    if not isinstance(dataset_name, str) or not re.fullmatch(
+        r"\A[a-zA-Z0-9_]{1,1024}\Z", dataset_name
+    ):
         raise ValueError("Invalid dataset_name in import file: contains invalid characters.")
+    if google_cloud_project_id is not None and (
+        not isinstance(google_cloud_project_id, str)
+        or not re.fullmatch(r"\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,1023}\Z", google_cloud_project_id)
+    ):
+        raise ValueError(
+            "Invalid google_cloud_project_id in import file: contains invalid characters."
+        )
     viewstate = json_project.get("viewstate")
     jurisdiction_boundary_geojson = json_project.get("jurisdiction_boundary_geojson")
     map_snapshot = json_project.get("map_snapshot")

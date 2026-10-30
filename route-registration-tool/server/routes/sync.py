@@ -14,10 +14,11 @@
 
 
 import logging
+import re
 from fastapi import APIRouter, HTTPException
 from server.db.common import query_db
 from typing import Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional, Any
 from server.utils.sync_routes import execute_sync
@@ -29,8 +30,10 @@ logger = logging.getLogger("sync_api")
 
 router = APIRouter()
 
-DATASET_NAME_REGEX = r"^[a-zA-Z0-9_-]{1,1024}$"
-GCP_PROJECT_ID_REGEX = r"^[a-zA-Z0-9_-]{1,1024}$"
+DATASET_NAME_REGEX = r"^[a-zA-Z0-9_]{1,1024}$"
+GCP_PROJECT_ID_REGEX = r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,1023}$"
+_DATASET_NAME_FULLMATCH = re.compile(r"\A[a-zA-Z0-9_]{1,1024}\Z")
+_GCP_PROJECT_ID_FULLMATCH = re.compile(r"\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,1023}\Z")
 
 class SyncToBigQueryRequest(BaseModel):
     db_project_id: int
@@ -39,6 +42,24 @@ class SyncToBigQueryRequest(BaseModel):
     dataset_name: str = Field(..., pattern=DATASET_NAME_REGEX, description="BigQuery dataset name")
     tag: Optional[str] = None  # Optional: If provided, only syncs specific tag (no BQ/Fetch)
     uuid: Optional[str] = None  # Optional: If provided, only syncs a single route
+
+    @field_validator("dataset_name")
+    @classmethod
+    def _validate_dataset_name(cls, v: str) -> str:
+        if not isinstance(v, str) or not _DATASET_NAME_FULLMATCH.fullmatch(v):
+            raise ValueError(
+                "dataset_name must contain only ASCII letters, digits, and underscores (1-1024 chars)."
+            )
+        return v
+
+    @field_validator("gcp_project_id")
+    @classmethod
+    def _validate_gcp_project_id(cls, v: str) -> str:
+        if not isinstance(v, str) or not _GCP_PROJECT_ID_FULLMATCH.fullmatch(v):
+            raise ValueError(
+                "gcp_project_id must contain only ASCII letters, digits, underscores, and hyphens."
+            )
+        return v
 
 class SyncToBigQueryResponse(BaseModel):
     status: str

@@ -103,49 +103,161 @@ load_dotenv(
 )
 VIEW_MODE = os.getenv("VIEW_MODE") or "false"
 
-_BIGQUERY_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,1024}$")
+_BQ_DATASET_ID_PATTERN = re.compile(r"\A[a-zA-Z0-9_]{1,1024}\Z")
+_GCP_PROJECT_ID_PATTERN = re.compile(r"\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,1023}\Z")
+
+_BQ_SYNC_QUERY = """
+    WITH route_statuses AS (
+        SELECT selected_route_id, status
+        FROM `routes_status`
+    ),
+    latest_route_record AS (
+        SELECT
+            r.selected_route_id,
+            r.display_name,
+            r.route_geometry,
+            r.record_time,
+            r.duration_in_seconds,
+            r.static_duration_in_seconds,
+            r.speed_reading_intervals -- Keep the array intact for now
+        FROM `recent_roads_data` r
+        JOIN route_statuses rs ON r.selected_route_id = rs.selected_route_id
+        WHERE
+            -- 1. Optimization: Range filter allows partition pruning
+            r.record_time >= TIMESTAMP(CURRENT_DATE("Asia/Kolkata"))
+            AND r.record_time < TIMESTAMP(DATE_ADD(CURRENT_DATE("Asia/Kolkata"), INTERVAL 1 DAY))
+        -- 2. Optimization: Filter for latest record BEFORE unnesting/calculating geometry
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY r.selected_route_id ORDER BY r.record_time DESC) = 1
+    )
+    SELECT
+        rs.selected_route_id,
+        rs.status,
+        lrr.display_name,
+        lrr.route_geometry,
+        lrr.record_time,
+        -- 3. Optimization: Calculate Geometry once per route, not once per speed interval
+        ST_LENGTH(lrr.route_geometry)/1000 AS route_length_km,
+        lrr.duration_in_seconds,
+        lrr.static_duration_in_seconds,
+        sri.speed
+    FROM route_statuses rs
+    LEFT JOIN latest_route_record lrr
+        ON rs.selected_route_id = lrr.selected_route_id
+    -- 4. Logic Fix: Unnest ONLY the single latest record found
+    LEFT JOIN UNNEST(lrr.speed_reading_intervals) AS sri;
+"""
 
 
-def validate_bigquery_identifier(value: str, field_name: str = "identifier") -> str:
+def validate_bigquery_dataset_id(value: str, field_name: str = "dataset_name") -> str:
     """
-    Validates that a BigQuery identifier (dataset name or project ID) contains
-    only safe alphanumeric characters, underscores, and hyphens, preventing
-    SQL injection breakout via backticks, whitespace, quotes, or comments.
+    Validates that a BigQuery dataset ID strictly conforms to BigQuery dataset
+    naming rules: 1-1024 ASCII letters, digits, or underscores only (no hyphens,
+    dots, backticks, whitespace, quotes, comments, or trailing newlines).
     """
     if not value or not isinstance(value, str):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid {field_name}: must be a non-empty string."
+            detail=f"Invalid {field_name}: must be a non-empty string.",
         )
-    if not _BIGQUERY_IDENTIFIER_PATTERN.match(value):
+    if not _BQ_DATASET_ID_PATTERN.fullmatch(value):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid {field_name}: contains invalid characters. Only alphanumeric characters, underscores, and hyphens are allowed."
+            detail=(
+                f"Invalid {field_name}: contains invalid characters. "
+                "Only alphanumeric characters and underscores are allowed."
+            ),
         )
     return value
 
 
-async def run_bq_query(client, sql):
+def validate_gcp_project_id(value: str, field_name: str = "gcp_project_id") -> str:
+    """
+    Validates that a GCP project identifier contains only safe ASCII
+    alphanumeric characters, underscores, and hyphens (starting with an
+    alphanumeric character), using re.fullmatch to reject trailing newlines,
+    dots, backticks, whitespace, quotes, or SQL comments.
+    """
+    if not value or not isinstance(value, str):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name}: must be a non-empty string.",
+        )
+    if not _GCP_PROJECT_ID_PATTERN.fullmatch(value):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid {field_name}: contains invalid characters. "
+                "Only alphanumeric characters, underscores, and hyphens are allowed."
+            ),
+        )
+    return value
+
+
+def validate_bigquery_identifier(value: str, field_name: str = "identifier") -> str:
+    """
+    Backward-compatible identifier validator dispatching BigQuery dataset fields
+    to strict dataset validation (alphanumeric + underscore) and project/generic
+    identifiers to strict fullmatch validation.
+    """
+    if field_name and "dataset" in field_name.lower():
+        return validate_bigquery_dataset_id(value, field_name)
+    return validate_gcp_project_id(value, field_name)
+
+
+async def run_bq_query(
+    client, sql: str, job_config: Optional[bigquery.QueryJobConfig] = None
+):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: list(client.query(sql).result()))
+    return await loop.run_in_executor(
+        None, lambda: list(client.query(sql, job_config=job_config).result())
+    )
 
 
 # -------------------------
 # DATABASE HELPERS
 # -------------------------
-async def get_project_uuid(db_project_id: int) -> Optional[str]:
-    """Return project_uuid for the given project id, or None if not found."""
+async def get_project_sync_config(db_project_id: int) -> Optional[dict]:
+    """Return sync configuration fields for the given project id, or None if not found."""
     try:
         async with async_engine.begin() as conn:
             result = await conn.execute(
-                text("SELECT project_uuid FROM projects WHERE id = :id AND deleted_at IS NULL"),
+                text(
+                    "SELECT project_uuid, google_cloud_project_id, "
+                    "google_cloud_project_number, dataset_name "
+                    "FROM projects WHERE id = :id AND deleted_at IS NULL"
+                ),
                 {"id": db_project_id},
             )
             row = result.fetchone()
-            return row[0] if row and row[0] else None
+            if not row:
+                return None
+            mapping = getattr(row, "_mapping", None)
+            if mapping is not None:
+                return {
+                    "project_uuid": mapping.get("project_uuid"),
+                    "google_cloud_project_id": mapping.get("google_cloud_project_id"),
+                    "google_cloud_project_number": mapping.get(
+                        "google_cloud_project_number"
+                    ),
+                    "dataset_name": mapping.get("dataset_name"),
+                }
+            return {
+                "project_uuid": row[0] if len(row) > 0 else None,
+                "google_cloud_project_id": row[1] if len(row) > 1 else None,
+                "google_cloud_project_number": row[2] if len(row) > 2 else None,
+                "dataset_name": row[3] if len(row) > 3 else None,
+            }
     except Exception as e:
-        logger.error(f"Error fetching project_uuid for project {db_project_id}: {e}")
+        logger.error(f"Error fetching project sync config for project {db_project_id}: {e}")
         return None
+
+
+async def get_project_uuid(db_project_id: int) -> Optional[str]:
+    """Return project_uuid for the given project id, or None if not found."""
+    config = await get_project_sync_config(db_project_id)
+    if not config:
+        return None
+    return config.get("project_uuid") or None
 
 
 async def bulk_update_deleted_routes(project_uuid: str, uuids):
@@ -1349,55 +1461,17 @@ async def perform_bq_sync(gcp_project_id, db_project_id, dataset_name: str):
     Raises:
         HTTPException: If BigQuery query fails (fail-fast behavior)
     """
-    validate_bigquery_identifier(gcp_project_id, "gcp_project_id")
-    validate_bigquery_identifier(dataset_name, "dataset_name")
+    validate_gcp_project_id(gcp_project_id, "gcp_project_id")
+    validate_bigquery_dataset_id(dataset_name, "dataset_name")
 
     logger.info(
         f"Performing BQ sync for project {db_project_id} with dataset: {dataset_name}."
     )
     try:
         client = bigquery.Client(project=gcp_project_id)
-        query = f"""
-            WITH route_statuses AS (
-                SELECT selected_route_id, status
-                FROM `{gcp_project_id}.{dataset_name}.routes_status`
-            ),
-            latest_route_record AS (
-                SELECT 
-                    r.selected_route_id, 
-                    r.display_name, 
-                    r.route_geometry, 
-                    r.record_time, 
-                    r.duration_in_seconds, 
-                    r.static_duration_in_seconds,
-                    r.speed_reading_intervals -- Keep the array intact for now
-                FROM `{gcp_project_id}.{dataset_name}.recent_roads_data` r
-                JOIN route_statuses rs ON r.selected_route_id = rs.selected_route_id
-                WHERE 
-                    -- 1. Optimization: Range filter allows partition pruning
-                    r.record_time >= TIMESTAMP(CURRENT_DATE("Asia/Kolkata"))
-                    AND r.record_time < TIMESTAMP(DATE_ADD(CURRENT_DATE("Asia/Kolkata"), INTERVAL 1 DAY))
-                -- 2. Optimization: Filter for latest record BEFORE unnesting/calculating geometry
-                QUALIFY ROW_NUMBER() OVER (PARTITION BY r.selected_route_id ORDER BY r.record_time DESC) = 1
-            )
-            SELECT 
-                rs.selected_route_id, 
-                rs.status, 
-                lrr.display_name, 
-                lrr.route_geometry, 
-                lrr.record_time, 
-                -- 3. Optimization: Calculate Geometry once per route, not once per speed interval
-                ST_LENGTH(lrr.route_geometry)/1000 AS route_length_km, 
-                lrr.duration_in_seconds,
-                lrr.static_duration_in_seconds, 
-                sri.speed
-            FROM route_statuses rs
-            LEFT JOIN latest_route_record lrr 
-                ON rs.selected_route_id = lrr.selected_route_id
-            -- 4. Logic Fix: Unnest ONLY the single latest record found
-            LEFT JOIN UNNEST(lrr.speed_reading_intervals) AS sri;
-        """
-        rows = await run_bq_query(client, query)
+        dataset_ref = bigquery.DatasetReference(gcp_project_id, dataset_name)
+        job_config = bigquery.QueryJobConfig(default_dataset=dataset_ref)
+        rows = await run_bq_query(client, _BQ_SYNC_QUERY, job_config=job_config)
         rows = [dict(row) for row in rows]
         logger.info(f"Fetched {len(rows)} rows from BigQuery.")
     except HTTPException:
@@ -1517,14 +1591,54 @@ async def execute_sync(
         logger.info("Running in view mode.")
         return {"status": "success", "message": "Running in view mode."}
 
-    validate_bigquery_identifier(gcp_project_id, "gcp_project_id")
-    validate_bigquery_identifier(dataset_name, "dataset_name")
+    validate_gcp_project_id(gcp_project_id, "gcp_project_id")
+    validate_bigquery_dataset_id(dataset_name, "dataset_name")
 
-    project_uuid = await get_project_uuid(db_project_id)
+    project_config = await get_project_sync_config(db_project_id)
+    project_uuid = (project_config or {}).get("project_uuid")
     if not project_uuid:
         raise HTTPException(
             status_code=400,
             detail="Project has no project_uuid. Please ensure the project is properly configured.",
+        )
+
+    stored_gcp_project_id = (project_config or {}).get("google_cloud_project_id")
+    if stored_gcp_project_id and stored_gcp_project_id != gcp_project_id:
+        logger.warning(
+            "Sync rejected for db_project_id=%s: gcp_project_id mismatch (expected %r, got %r)",
+            db_project_id,
+            stored_gcp_project_id,
+            gcp_project_id,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid sync request: gcp_project_id does not match the configured project.",
+        )
+
+    stored_project_number = (project_config or {}).get("google_cloud_project_number")
+    if stored_project_number and str(stored_project_number) != str(project_number):
+        logger.warning(
+            "Sync rejected for db_project_id=%s: project_number mismatch (expected %r, got %r)",
+            db_project_id,
+            stored_project_number,
+            project_number,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid sync request: project_number does not match the configured project.",
+        )
+
+    stored_dataset_name = (project_config or {}).get("dataset_name")
+    if stored_dataset_name and stored_dataset_name != dataset_name:
+        logger.warning(
+            "Sync rejected for db_project_id=%s: dataset_name mismatch (expected %r, got %r)",
+            db_project_id,
+            stored_dataset_name,
+            dataset_name,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid sync request: dataset_name does not match the configured project.",
         )
 
     timing_records = []
@@ -1679,16 +1793,16 @@ async def execute_sync(
         logger.error(f"Failed to list routes from API: {e.message}")
         raise HTTPException(
             status_code=e.status_code,
-            detail=f"Failed to fetch routes from Roads API: {e.message}"
+            detail="Failed to fetch routes from Roads API. Check server logs for details.",
         )
     except HTTPException:
         # Re-raise HTTPException from perform_bq_sync or other sources
         raise
     except Exception as e:
-        logger.error(f"Failed during parallel fetch: {e}")
+        logger.exception(f"Failed during parallel fetch: {e}")
         raise HTTPException(
             status_code=502,
-            detail=f"Sync initialization failed: {str(e)}"
+            detail="Sync initialization failed. Check server logs for details.",
         )
     op_end = time.time()
     end_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
