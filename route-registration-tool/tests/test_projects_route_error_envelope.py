@@ -60,7 +60,7 @@ async def test_create_project_repo_domain_error_becomes_http_exception(monkeypat
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="123",
         subscription_id="sub-1",
-        dataset_name="dataset-1",
+        dataset_name="dataset_1",
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -91,7 +91,7 @@ async def test_create_project_unexpected_error_returns_500_envelope_with_sanitiz
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="123",
         subscription_id="sub-1",
-        dataset_name="dataset-1",
+        dataset_name="dataset_1",
     )
 
     resp = await create_project(data)
@@ -139,7 +139,7 @@ async def test_create_project_success_returns_project_out(monkeypatch):
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="123",
         subscription_id="sub-1",
-        dataset_name="dataset-1",
+        dataset_name="dataset_1",
     )
 
     out = await create_project(data)
@@ -170,7 +170,7 @@ async def test_format_and_create_unexpected_error_returns_500_envelope_with_sani
                 google_cloud_project_id="gcp-1",
                 google_cloud_project_number="123",
                 subscription_id="sub-1",
-                dataset_name="dataset-1",
+                dataset_name="dataset_1",
             )
         ]
     )

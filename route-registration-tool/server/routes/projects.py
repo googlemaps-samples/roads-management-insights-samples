@@ -20,7 +20,7 @@ import uuid
 import re
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from server.db.common import query_db
@@ -35,6 +35,32 @@ logger = logging.getLogger("projects_api")
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
+DATASET_NAME_REGEX = r"^[a-zA-Z0-9_]{1,1024}$"
+GCP_PROJECT_ID_REGEX = r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,1023}$"
+_DATASET_NAME_FULLMATCH = re.compile(r"\A[a-zA-Z0-9_]{1,1024}\Z")
+_GCP_PROJECT_ID_FULLMATCH = re.compile(r"\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,1023}\Z")
+
+
+def _check_optional_dataset_name(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if not isinstance(v, str) or not _DATASET_NAME_FULLMATCH.fullmatch(v):
+        raise ValueError(
+            "dataset_name must contain only ASCII letters, digits, and underscores (1-1024 chars)."
+        )
+    return v
+
+
+def _check_optional_gcp_project_id(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    if not isinstance(v, str) or not _GCP_PROJECT_ID_FULLMATCH.fullmatch(v):
+        raise ValueError(
+            "google_cloud_project_id must contain only ASCII letters, digits, underscores, and hyphens."
+        )
+    return v
+
+
 # --------------------------
 # Pydantic Models
 # --------------------------
@@ -46,20 +72,40 @@ class ProjectCreate(BaseModel):
     )
     project_name: str = Field(..., description="Name of the project")
     jurisdiction_boundary_geojson: str = Field(..., description="GeoJSON boundary as string")
-    google_cloud_project_id: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="Google Cloud Project ID")
+    google_cloud_project_id: Optional[str] = Field(None, pattern=GCP_PROJECT_ID_REGEX, description="Google Cloud Project ID")
     google_cloud_project_number: Optional[str] = Field(None, description="Google Cloud Project Number")
     subscription_id: Optional[str] = Field(None, description="Subscription ID")
-    dataset_name: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="BigQuery dataset name")
+    dataset_name: Optional[str] = Field(None, pattern=DATASET_NAME_REGEX, description="BigQuery dataset name")
+
+    @field_validator("dataset_name")
+    @classmethod
+    def _validate_dataset_name(cls, v: Optional[str]) -> Optional[str]:
+        return _check_optional_dataset_name(v)
+
+    @field_validator("google_cloud_project_id")
+    @classmethod
+    def _validate_gcp_project_id(cls, v: Optional[str]) -> Optional[str]:
+        return _check_optional_gcp_project_id(v)
 
 class ProjectUpdate(BaseModel):
     """Model for updating a project"""
     project_name: Optional[str] = Field(None, description="Name of the project")
     jurisdiction_boundary_geojson: Optional[str] = Field(None, description="GeoJSON boundary as string")
-    google_cloud_project_id: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="Google Cloud Project ID")
+    google_cloud_project_id: Optional[str] = Field(None, pattern=GCP_PROJECT_ID_REGEX, description="Google Cloud Project ID")
     google_cloud_project_number: Optional[str] = Field(None, description="Google Cloud Project Number")
     subscription_id: Optional[str] = Field(None, description="Subscription ID")
-    dataset_name: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="BigQuery dataset name")
+    dataset_name: Optional[str] = Field(None, pattern=DATASET_NAME_REGEX, description="BigQuery dataset name")
     map_snapshot: Optional[str] = Field(None, description="Base64-encoded map snapshot image")
+
+    @field_validator("dataset_name")
+    @classmethod
+    def _validate_dataset_name(cls, v: Optional[str]) -> Optional[str]:
+        return _check_optional_dataset_name(v)
+
+    @field_validator("google_cloud_project_id")
+    @classmethod
+    def _validate_gcp_project_id(cls, v: Optional[str]) -> Optional[str]:
+        return _check_optional_gcp_project_id(v)
 
 class ProjectOut(BaseModel):
     """Model for project responses"""
@@ -84,10 +130,20 @@ class ProjectFormatAndCreate(BaseModel):
     region_name: Optional[str] = Field(None, description="Region name (maps to project_name)")
     project_name: Optional[str] = Field(None, description="Project name")
     geojson: Optional[str] = Field(None, description="GeoJSON (maps to jurisdiction_boundary_geojson)")
-    google_cloud_project_id: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="Google Cloud Project ID")
+    google_cloud_project_id: Optional[str] = Field(None, pattern=GCP_PROJECT_ID_REGEX, description="Google Cloud Project ID")
     google_cloud_project_number: Optional[str] = Field(None, description="Google Cloud Project Number")
     subscription_id: Optional[str] = Field(None, description="Subscription ID")
-    dataset_name: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,1024}$", description="BigQuery dataset name")
+    dataset_name: Optional[str] = Field(None, pattern=DATASET_NAME_REGEX, description="BigQuery dataset name")
+
+    @field_validator("dataset_name")
+    @classmethod
+    def _validate_dataset_name(cls, v: Optional[str]) -> Optional[str]:
+        return _check_optional_dataset_name(v)
+
+    @field_validator("google_cloud_project_id")
+    @classmethod
+    def _validate_gcp_project_id(cls, v: Optional[str]) -> Optional[str]:
+        return _check_optional_gcp_project_id(v)
 
 class FormatAndCreateRequest(BaseModel):
     """Request body for format-and-create endpoint"""

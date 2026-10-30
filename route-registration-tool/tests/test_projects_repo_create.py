@@ -84,7 +84,7 @@ async def test_duplicate_project_name_conflict(monkeypatch, tmp_path):
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="123",
         subscription_id="sub-1",
-        dataset_name="dataset-1",
+        dataset_name="dataset_1",
         enable_multitenant=True,
     )
 
@@ -95,7 +95,7 @@ async def test_duplicate_project_name_conflict(monkeypatch, tmp_path):
             google_cloud_project_id="gcp-2",
             google_cloud_project_number="456",
             subscription_id="sub-2",
-            dataset_name="dataset-2",
+            dataset_name="dataset_2",
             enable_multitenant=True,
         )
 
@@ -117,7 +117,7 @@ async def test_same_project_name_allowed_for_different_sessions(monkeypatch, tmp
         google_cloud_project_id="gcp-a",
         google_cloud_project_number="111",
         subscription_id="sub-a",
-        dataset_name="dataset-a",
+        dataset_name="dataset_a",
         enable_multitenant=True,
         session_id=sid_a,
     )
@@ -127,7 +127,7 @@ async def test_same_project_name_allowed_for_different_sessions(monkeypatch, tmp
         google_cloud_project_id="gcp-b",
         google_cloud_project_number="222",
         subscription_id="sub-b",
-        dataset_name="dataset-b",
+        dataset_name="dataset_b",
         enable_multitenant=True,
         session_id=sid_b,
     )
@@ -153,7 +153,7 @@ async def test_duplicate_project_name_same_session_still_conflict(
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="123",
         subscription_id="sub-1",
-        dataset_name="dataset-1",
+        dataset_name="dataset_1",
         enable_multitenant=True,
         session_id=sid,
     )
@@ -165,7 +165,7 @@ async def test_duplicate_project_name_same_session_still_conflict(
             google_cloud_project_id="gcp-2",
             google_cloud_project_number="456",
             subscription_id="sub-2",
-            dataset_name="dataset-2",
+            dataset_name="dataset_2",
             enable_multitenant=True,
             session_id=sid,
         )
@@ -188,7 +188,7 @@ async def test_duplicate_gcp_project_id_raises_when_multitenant_disabled(
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="123",
         subscription_id="sub-1",
-        dataset_name="dataset-1",
+        dataset_name="dataset_1",
         enable_multitenant=False,
     )
 
@@ -199,7 +199,7 @@ async def test_duplicate_gcp_project_id_raises_when_multitenant_disabled(
             google_cloud_project_id="gcp-1",
             google_cloud_project_number="999",
             subscription_id="sub-2",
-            dataset_name="dataset-2",
+            dataset_name="dataset_2",
             enable_multitenant=False,
         )
 
@@ -224,7 +224,7 @@ async def test_duplicate_gcp_project_id_succeeds_when_multitenant_enabled(
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="123",
         subscription_id="sub-1",
-        dataset_name="dataset-1",
+        dataset_name="dataset_1",
         enable_multitenant=True,
     )
 
@@ -234,7 +234,7 @@ async def test_duplicate_gcp_project_id_succeeds_when_multitenant_enabled(
         google_cloud_project_id="gcp-1",
         google_cloud_project_number="999",
         subscription_id="sub-2",
-        dataset_name="dataset-2",
+        dataset_name="dataset_2",
         enable_multitenant=True,
     )
 
@@ -272,7 +272,7 @@ async def test_postgres_unique_violation_maps_23505_to_project_name_conflict(
             google_cloud_project_id="gcp-1",
             google_cloud_project_number="123",
             subscription_id="sub-1",
-            dataset_name="dataset-1",
+            dataset_name="dataset_1",
             enable_multitenant=True,
         )
 
